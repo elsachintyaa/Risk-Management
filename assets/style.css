@@ -1,0 +1,174 @@
+/* =========================================================
+   GOLD RISK MONITOR
+   CUSTOM STYLE
+   ========================================================= */
+
+
+/* =========================================================
+   FONT
+   ========================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+
+
+/* =========================================================
+   GLOBAL
+   ========================================================= */
+
+html,
+body {
+    font-family: "Poppins", sans-serif;
+}
+
+
+/* =========================================================
+   REMOVE NUMBER INPUT SPINNER
+   ========================================================= */
+
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.no-spinner {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+
+/* =========================================================
+   INPUT
+   ========================================================= */
+
+input {
+    font-family: "Poppins", sans-serif;
+}
+
+input::placeholder {
+    color: rgba(148, 163, 184, 0.45);
+}
+
+input:focus {
+    outline: none;
+}
+
+
+/* =========================================================
+   CANDLE CHART
+   ========================================================= */
+
+#market-chart {
+    position: relative;
+    width: 100%;
+    min-height: 176px;
+}
+
+#market-chart canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+
+/* =========================================================
+   PRICE MOVEMENT
+   ========================================================= */
+
+#price-arrow.up {
+    color: #34d399;
+}
+
+#price-arrow.down {
+    color: #f87171;
+}
+
+#price-change.up {
+    color: #34d399;
+}
+
+#price-change.down {
+    color: #f87171;
+}
+
+
+/* =========================================================
+   PRICE FLASH
+   ========================================================= */
+
+.price-flash {
+    animation: priceFlash 0.35s ease;
+}
+
+@keyframes priceFlash {
+
+    0% {
+        opacity: 0.45;
+        transform: translateY(-2px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+}
+
+
+/* =========================================================
+   PRODUCT BUTTON
+   ========================================================= */
+
+.product-button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.product-button:active {
+    transform: scale(0.98);
+}
+
+
+/* =========================================================
+   BUY / SELL BUTTON
+   ========================================================= */
+
+#buy-button,
+#sell-button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+#buy-button:active,
+#sell-button:active {
+    transform: scale(0.99);
+}
+
+
+/* =========================================================
+   SCROLLBAR
+   ========================================================= */
+
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #020617;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 999px;
+}
+
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width: 640px) {
+
+    main {
+        padding-bottom: 20px;
+    }
+
+}
