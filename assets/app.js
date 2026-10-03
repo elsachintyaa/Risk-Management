@@ -1,216 +1,59 @@
-/* =========================================================
-   GOLD RISK MONITOR
-   NATIVE PHP VERSION
-   ========================================================= */
-
-const API_URL = "/api/market.js";
-
-
-/* =========================================================
-   PRODUCTS
-   ========================================================= */
+const API_URL = "/api/market";
 
 const PRODUCTS = {
-
     gold: {
-        symbol: "XAU/USD",
         name: "XAU/USD",
         label: "GOLD",
-
-        // $100 PER LOT
         contractSize: 100,
-
-        spread: 0.80,
-        decimals: 2
+        decimals: 2,
+        spread: 0.80
     },
 
     hangseng: {
-        symbol: "HSI",
         name: "HSI",
         label: "HANG SENG",
-
-        // $5 PER LOT
         contractSize: 5,
-
-        spread: 16,
-        decimals: 0
+        decimals: 0,
+        spread: 16
     },
 
     nikkei: {
-        symbol: "N225",
         name: "N225",
         label: "NIKKEI",
-
-        // $5 PER LOT
         contractSize: 5,
-
-        spread: 20,
-        decimals: 0
+        decimals: 0,
+        spread: 20
     }
-
 };
 
-
-/* =========================================================
-   STATE
-   ========================================================= */
-
 const state = {
-
     product: "gold",
-
     position: "BUY",
 
     lastTrade: null,
-
     sell: null,
-
     buy: null,
-
     spread: null,
 
     previousPrice: null,
 
-    priceHistory: [],
-
     candles: [],
 
+    // 1 candle = 1 menit
+    candleIntervalMs: 60000,
+
     timer: null,
-
-    // 1 candle = 5 detik
-    candleInterval: 5000,
-
-    maxCandles: 60
-
+    requestInProgress: false
 };
 
+const $ = id =>
+    document.getElementById(id);
 
-/* =========================================================
-   DOM HELPER
-   ========================================================= */
+function money(value, decimals = 2) {
 
-const $ = (id) => {
-
-    return document.getElementById(id);
-
-};
-
-
-/* =========================================================
-   PRODUCT
-   ========================================================= */
-
-function getProduct() {
-
-    return PRODUCTS[state.product];
-
-}
-
-
-/* =========================================================
-   PARSE NUMBER
-   ========================================================= */
-
-function parseNumber(value) {
-
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-        return 0;
-    }
-
-
-    let stringValue = String(value)
-        .trim();
-
-
-    /*
-     * Format Indonesia:
-     *
-     * 10.000
-     * 10.000,50
-     */
-
-    if (
-        stringValue.includes(",")
-    ) {
-
-        stringValue =
-            stringValue
-                .replace(/\./g, "")
-                .replace(",", ".");
-
-    }
-
-    else {
-
-        /*
-         * Untuk input biasa seperti:
-         *
-         * 10000
-         * 4300.50
-         */
-
-        stringValue =
-            stringValue.replace(/[^\d.-]/g, "");
-
-    }
-
-
-    const number =
-        Number.parseFloat(
-            stringValue
-        );
-
-
-    return Number.isFinite(number)
-        ? number
-        : 0;
-
-}
-
-
-/* =========================================================
-   FORMAT RIBUAN
-   ========================================================= */
-
-function formatThousands(value) {
-
-    const digits =
-        String(value)
-            .replace(/\D/g, "");
-
-
-    if (!digits) {
-        return "";
-    }
-
-
-    return digits.replace(
-        /\B(?=(\d{3})+(?!\d))/g,
-        "."
-    );
-
-}
-
-
-/* =========================================================
-   FORMAT MONEY
-   ========================================================= */
-
-function money(
-    value,
-    decimals = 2
-) {
-
-    if (
-        !Number.isFinite(value)
-    ) {
+    if (!Number.isFinite(value)) {
         return "0.00";
     }
-
 
     return Number(value).toLocaleString(
         "en-US",
@@ -219,348 +62,263 @@ function money(
             maximumFractionDigits: decimals
         }
     );
-
 }
 
+function num(id) {
 
-/* =========================================================
-   FORMAT INPUT MONEY
-   ========================================================= */
+    const el = $(id);
 
-function formatInputMoney(value) {
-
-    if (
-        value === null ||
-        value === undefined
-    ) {
-        return "";
+    if (!el) {
+        return 0;
     }
 
+    const value =
+        Number.parseFloat(el.value);
 
-    const digits =
-        String(value)
-            .replace(/\D/g, "");
+    return Number.isFinite(value)
+        ? value
+        : 0;
+}
 
+function setText(id, value) {
 
-    if (!digits) {
-        return "";
+    const el = $(id);
+
+    if (el) {
+        el.textContent = value;
     }
+}
 
-
-    return formatThousands(
-        digits
-    );
-
+function product() {
+    return PRODUCTS[state.product];
 }
 
 
 /* =========================================================
-   SET TEXT
+   PRODUCT
    ========================================================= */
 
-function setText(
-    id,
-    value
-) {
+function setProduct(name) {
 
-    const element = $(id);
-
-
-    if (element) {
-
-        element.textContent =
-            value;
-
-    }
-
-}
-
-
-/* =========================================================
-   FORMAT CHART PRICE
-   ========================================================= */
-
-function formatChartPrice(
-    value
-) {
-
-    const product =
-        getProduct();
-
-
-    return Number(value).toLocaleString(
-        "en-US",
-        {
-            minimumFractionDigits:
-                product.decimals,
-
-            maximumFractionDigits:
-                product.decimals
-        }
-    );
-
-}
-
-
-/* =========================================================
-   PRODUCT SWITCH
-   ========================================================= */
-
-function setProduct(
-    product
-) {
-
-    if (
-        !PRODUCTS[product]
-    ) {
+    if (!PRODUCTS[name]) {
         return;
     }
 
+    state.product = name;
 
-    state.product =
-        product;
+    state.lastTrade = null;
+    state.previousPrice = null;
+    state.sell = null;
+    state.buy = null;
 
+    state.spread =
+        PRODUCTS[name].spread;
 
-    const productData =
-        PRODUCTS[product];
+    state.candles = [];
 
-
-    /*
-     * Instrument
-     */
+    const p = product();
 
     setText(
         "instrument-name",
-        productData.name
+        p.name
     );
-
 
     setText(
         "chart-symbol",
-        productData.name
+        p.name
     );
 
-
-    /*
-     * Tombol produk
-     */
-
     document
-        .querySelectorAll(
-            ".product-button"
-        )
+        .querySelectorAll(".product-button")
         .forEach(button => {
 
             const active =
-                button.dataset.product ===
-                product;
-
+                button.dataset.product === name;
 
             button.classList.toggle(
                 "border-amber-400",
                 active
             );
 
-
             button.classList.toggle(
                 "bg-amber-500/15",
                 active
             );
-
 
             button.classList.toggle(
                 "border-white/10",
                 !active
             );
 
-
             button.classList.toggle(
                 "bg-slate-800",
                 !active
             );
-
         });
 
-
-    /*
-     * Reset market
-     */
-
-    state.lastTrade = null;
-
-    state.sell = null;
-
-    state.buy = null;
-
-    state.spread = null;
-
-    state.previousPrice = null;
-
-    state.priceHistory = [];
-
-    state.candles = [];
-
+    setText(
+        "market-update",
+        `SPREAD ${money(
+            p.spread,
+            p.decimals
+        )}`
+    );
 
     drawCandles();
 
-
-    fetchMarket();
-
+    fetchMarket(true);
 }
 
 
 /* =========================================================
-   POSITION BUY / SELL
+   POSITION
    ========================================================= */
 
-function setPosition(
-    position
-) {
+function setPosition(position) {
 
-    state.position =
-        position;
+    state.position = position;
 
-
-    const buyButton =
+    const buy =
         $("buy-button");
 
-    const sellButton =
+    const sell =
         $("sell-button");
 
-
-    if (
-        !buyButton ||
-        !sellButton
-    ) {
+    if (!buy || !sell) {
         return;
     }
 
-
-    /*
-     * BUY
-     */
-
-    if (
+    buy.className =
         position === "BUY"
-    ) {
 
-        buyButton.className =
-            "rounded-2xl border border-emerald-400 bg-emerald-500/20 px-4 py-4 text-sm font-bold text-emerald-400";
+            ? "rounded-2xl border border-emerald-400 bg-emerald-500/20 px-4 py-4 text-sm font-bold text-emerald-400"
 
-        sellButton.className =
-            "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
+            : "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
 
-    }
+    sell.className =
+        position === "SELL"
 
+            ? "rounded-2xl border border-red-400 bg-red-500/20 px-4 py-4 text-sm font-bold text-red-400"
 
-    /*
-     * SELL
-     */
-
-    else {
-
-        buyButton.className =
-            "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
-
-        sellButton.className =
-            "rounded-2xl border border-red-400 bg-red-500/20 px-4 py-4 text-sm font-bold text-red-400";
-
-    }
-
+            : "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
 
     calculateRisk();
-
 }
 
 
 /* =========================================================
-   MARKET PRICE
+   FETCH MARKET
    ========================================================= */
 
-async function fetchMarket() {
+async function fetchMarket(
+    loadHistory = false
+) {
 
-    const product =
-        getProduct();
+    if (state.requestInProgress) {
+        return;
+    }
 
+    state.requestInProgress = true;
 
     try {
 
+        const p = product();
+
+        const url =
+            `${API_URL}` +
+            `?symbol=${encodeURIComponent(p.name)}` +
+            `${loadHistory ? "&history=1" : ""}` +
+            `&_=${Date.now()}`;
+
         const response =
             await fetch(
-                `${API_URL}?symbol=${encodeURIComponent(product.symbol)}&_=${Date.now()}`,
+                url,
                 {
                     cache: "no-store"
                 }
             );
 
-
         const data =
             await response.json();
 
-
         if (
+            !response.ok ||
             !data.success
         ) {
-
-            console.warn(
-                "Market error:",
-                data
-            );
-
-
-            setText(
-                "market-update",
+            throw new Error(
                 data.message ||
-                "Harga market belum tersedia."
+                `HTTP ${response.status}`
             );
+        }
 
+        const price =
+            Number(data.price);
 
-            return;
-
+        if (!Number.isFinite(price)) {
+            throw new Error(
+                "Harga market tidak valid"
+            );
         }
 
 
-        const newPrice =
-            Number(
-                data.price ??
-                data.last_trade ??
-                data.data?.price
-            );
-
+        /* =========================================
+           LOAD REAL HISTORICAL CANDLES
+           ========================================= */
 
         if (
-            !Number.isFinite(
-                newPrice
-            )
+            loadHistory &&
+            Array.isArray(data.candles) &&
+            data.candles.length
         ) {
 
-            return;
-
+            state.candles =
+                data.candles
+                    .map(c => ({
+                        time: c.time,
+                        open: Number(c.open),
+                        high: Number(c.high),
+                        low: Number(c.low),
+                        close: Number(c.close)
+                    }))
+                    .filter(c =>
+                        Number.isFinite(c.open) &&
+                        Number.isFinite(c.high) &&
+                        Number.isFinite(c.low) &&
+                        Number.isFinite(c.close)
+                    )
+                    .slice(-42);
         }
 
 
-        updateMarket(
-            newPrice
-        );
+        updateMarket(price);
 
     }
-
 
     catch (error) {
 
         console.error(
-            "Market error:",
+            "Market Error:",
             error
         );
 
+        // Tetap tampilkan spread,
+        // jangan menimpa UI dengan SELL/BUY.
 
         setText(
             "market-update",
-            "Gagal menghubungi market."
+            `SPREAD ${money(
+                product().spread,
+                product().decimals
+            )}`
         );
 
     }
 
+    finally {
+
+        state.requestInProgress =
+            false;
+    }
 }
 
 
@@ -568,308 +326,141 @@ async function fetchMarket() {
    UPDATE MARKET
    ========================================================= */
 
-function updateMarket(
-    price
-) {
+function updateMarket(price) {
+
+    const p =
+        product();
 
     state.previousPrice =
         state.lastTrade;
 
-
     state.lastTrade =
         price;
 
-
-    const product =
-        getProduct();
-
-
-    /*
-     * SPREAD OTOMATIS
-     */
-
     state.spread =
-        Number(
-            product.spread
-        );
-
-
-    /*
-     * BID / SELL
-     *
-     * Market - half spread
-     */
+        p.spread;
 
     state.sell =
         price -
-        (
-            state.spread / 2
-        );
-
-
-    /*
-     * ASK / BUY
-     *
-     * Market + half spread
-     */
+        p.spread / 2;
 
     state.buy =
         price +
-        (
-            state.spread / 2
-        );
+        p.spread / 2;
 
 
-    /*
-     * UI
-     */
+    const difference =
+        state.previousPrice === null
+            ? 0
+            : price -
+              state.previousPrice;
 
-    updateMarketUI();
 
+    /* =========================================
+       PRICE
+       ========================================= */
 
-    /*
-     * History
-     */
-
-    state.priceHistory.push(
-        price
+    setText(
+        "market-price",
+        money(
+            price,
+            p.decimals
+        )
     );
 
 
-    if (
-        state.priceHistory.length >
-        300
-    ) {
+    /* =========================================
+       CHANGE
+       ========================================= */
 
-        state.priceHistory.shift();
+    setText(
+        "price-change",
 
-    }
-
-
-    /*
-     * Candle
-     */
-
-    updateCandles(
-        price
-    );
-
-
-    /*
-     * Risk
-     */
-
-    calculateRisk();
-
-}
-
-
-/* =========================================================
-   MARKET UI
-   ========================================================= */
-
-function updateMarketUI() {
-
-    const product =
-        getProduct();
-
-
-    /*
-     * Current price
-     */
-
-    const priceElement =
-        $("market-price");
-
-
-    if (priceElement) {
-
-        priceElement.textContent =
+        `${difference >= 0 ? "+" : ""}${
             money(
-                state.lastTrade,
-                product.decimals
-            );
+                difference,
+                p.decimals
+            )
+        }`
+    );
 
 
-        priceElement.classList.remove(
-            "price-flash"
-        );
+    setText(
+        "price-arrow",
 
+        difference > 0
+            ? "↑"
+            : difference < 0
+                ? "↓"
+                : "→"
+    );
 
-        void priceElement.offsetWidth;
-
-
-        priceElement.classList.add(
-            "price-flash"
-        );
-
-    }
-
-
-    /*
-     * Price change
-     */
 
     const arrow =
         $("price-arrow");
 
-    const changeElement =
-        $("price-change");
+    if (arrow) {
 
-
-    if (
-        state.previousPrice !== null &&
-        state.lastTrade !== null
-    ) {
-
-        const change =
-            state.lastTrade -
-            state.previousPrice;
-
-
-        const sign =
-            change > 0
-                ? "+"
-                : "";
-
-
-        if (changeElement) {
-
-            changeElement.textContent =
-                `${sign}${change.toFixed(
-                    product.decimals
-                )}`;
-
-        }
-
-
-        if (arrow) {
-
-            arrow.classList.remove(
-                "up",
-                "down"
-            );
-
-
-            if (
-                change > 0
-            ) {
-
-                arrow.textContent =
-                    "↑";
-
-                arrow.classList.add(
-                    "up"
-                );
-
-            }
-
-            else if (
-                change < 0
-            ) {
-
-                arrow.textContent =
-                    "↓";
-
-                arrow.classList.add(
-                    "down"
-                );
-
-            }
-
-            else {
-
-                arrow.textContent =
-                    "→";
-
-            }
-
-        }
-
-
-        if (changeElement) {
-
-            changeElement.classList.remove(
-                "up",
-                "down"
-            );
-
-
-            if (
-                change > 0
-            ) {
-
-                changeElement.classList.add(
-                    "up"
-                );
-
-            }
-
-            else if (
-                change < 0
-            ) {
-
-                changeElement.classList.add(
-                    "down"
-                );
-
-            }
-
-        }
-
+        arrow.className =
+            `text-sm font-bold ${
+                difference > 0
+                    ? "text-emerald-400"
+                    : difference < 0
+                        ? "text-red-400"
+                        : "text-slate-400"
+            }`;
     }
 
 
-    /*
-     * Market info
-     */
+    /* =========================================
+       ONLY SPREAD
+       ========================================= */
 
     setText(
         "market-update",
-
-        `SELL ${money(
-            state.sell,
-            product.decimals
-        )}  •  LAST TRADE ${money(
-            state.lastTrade,
-            product.decimals
-        )}  •  BUY ${money(
-            state.buy,
-            product.decimals
-        )}  •  SPREAD ${money(
+        `SPREAD ${money(
             state.spread,
-            product.decimals
+            p.decimals
         )}`
     );
 
+
+    /* =========================================
+       CANDLE
+       ========================================= */
+
+    updateCurrentCandle(price);
+
+    drawCandles();
+
+
+    /* =========================================
+       RISK
+       ========================================= */
+
+    calculateRisk();
 }
 
 
 /* =========================================================
-   CANDLE
+   CURRENT CANDLE
    ========================================================= */
 
-function updateCandles(
-    price
-) {
+function updateCurrentCandle(price) {
 
-    if (
-        !Number.isFinite(price)
-    ) {
+    if (!Number.isFinite(price)) {
         return;
     }
-
 
     const now =
         Date.now();
 
-
     const bucket =
         Math.floor(
             now /
-            state.candleInterval
+            state.candleIntervalMs
         ) *
-        state.candleInterval;
+        state.candleIntervalMs;
 
 
     let candle =
@@ -878,9 +469,34 @@ function updateCandles(
         ];
 
 
-    /*
-     * Candle baru
-     */
+    /* =========================================
+       NORMALIZE HISTORICAL TIME
+       ========================================= */
+
+    if (
+        candle &&
+        typeof candle.time === "string"
+    ) {
+
+        const parsed =
+            Date.parse(
+                candle.time.replace(
+                    " ",
+                    "T"
+                )
+            );
+
+        if (
+            Number.isFinite(parsed)
+        ) {
+            candle.time = parsed;
+        }
+    }
+
+
+    /* =========================================
+       NEW CANDLE
+       ========================================= */
 
     if (
         !candle ||
@@ -888,8 +504,11 @@ function updateCandles(
     ) {
 
         const open =
-            candle
+            candle &&
+            Number.isFinite(candle.close)
+
                 ? candle.close
+
                 : price;
 
 
@@ -897,20 +516,21 @@ function updateCandles(
 
             time: bucket,
 
-            open: open,
+            open,
 
-            high: Math.max(
-                open,
-                price
-            ),
+            high:
+                Math.max(
+                    open,
+                    price
+                ),
 
-            low: Math.min(
-                open,
-                price
-            ),
+            low:
+                Math.min(
+                    open,
+                    price
+                ),
 
             close: price
-
         };
 
 
@@ -921,92 +541,80 @@ function updateCandles(
 
         if (
             state.candles.length >
-            state.maxCandles
+            42
         ) {
 
             state.candles.shift();
-
         }
 
+        return;
     }
 
 
-    /*
-     * Update candle berjalan
-     */
+    /* =========================================
+       UPDATE CURRENT CANDLE
+       ========================================= */
 
-    else {
+    candle.high =
+        Math.max(
+            candle.high,
+            price
+        );
 
-        candle.close =
-            price;
+    candle.low =
+        Math.min(
+            candle.low,
+            price
+        );
 
-
-        candle.high =
-            Math.max(
-                candle.high,
-                price
-            );
-
-
-        candle.low =
-            Math.min(
-                candle.low,
-                price
-            );
-
-    }
-
-
-    drawCandles();
-
+    candle.close =
+        price;
 }
 
 
 /* =========================================================
-   GET CANVAS
+   DRAW CANDLE
    ========================================================= */
 
-function getChartCanvas() {
+function drawCandles() {
 
     const container =
         $("market-chart");
 
-
     if (!container) {
-        return null;
+        return;
+    }
+
+    container.innerHTML = "";
+
+
+    if (
+        !state.candles.length
+    ) {
+        return;
     }
 
 
-    let canvas =
-        container.querySelector(
+    const width =
+        Math.max(
+            container.clientWidth || 320,
+            280
+        );
+
+    const height =
+        Math.max(
+            container.clientHeight || 190,
+            170
+        );
+
+    const dpr =
+        window.devicePixelRatio || 1;
+
+
+    const canvas =
+        document.createElement(
             "canvas"
         );
-
-
-    if (!canvas) {
-
-        container.innerHTML =
-            "";
-
-
-        canvas =
-            document.createElement(
-                "canvas"
-            );
-
-
-        canvas.setAttribute(
-            "aria-label",
-            "Candlestick market chart"
-        );
-
-
-        container.appendChild(
-            canvas
-        );
-
-    }
-
 
     canvas.style.width =
         "100%";
@@ -1017,70 +625,25 @@ function getChartCanvas() {
     canvas.style.display =
         "block";
 
-
-    return canvas;
-
-}
-
-
-/* =========================================================
-   DRAW CANDLES
-   ========================================================= */
-
-function drawCandles() {
-
-    const canvas =
-        getChartCanvas();
-
-
-    if (
-        !canvas ||
-        state.candles.length === 0
-    ) {
-        return;
-    }
-
-
-    const container =
-        $("market-chart");
-
-
-    const width =
-        Math.max(
-            container.clientWidth || 320,
-            280
-        );
-
-
-    const height =
-        Math.max(
-            container.clientHeight || 176,
-            170
-        );
-
-
-    const dpr =
-        window.devicePixelRatio ||
-        1;
-
-
     canvas.width =
         Math.floor(
             width * dpr
         );
-
 
     canvas.height =
         Math.floor(
             height * dpr
         );
 
+    container.appendChild(
+        canvas
+    );
+
 
     const ctx =
         canvas.getContext(
             "2d"
         );
-
 
     ctx.setTransform(
         dpr,
@@ -1092,54 +655,36 @@ function drawCandles() {
     );
 
 
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
     const candles =
-        state.candles.slice(
-            -state.maxCandles
-        );
+        state.candles.slice(-42);
 
 
-    /*
-     * PRICE RANGE
-     */
-
-    let minPrice =
+    let min =
         Infinity;
 
-    let maxPrice =
+    let max =
         -Infinity;
 
 
-    candles.forEach(
-        candle => {
+    candles.forEach(c => {
 
-            minPrice =
-                Math.min(
-                    minPrice,
-                    candle.low
-                );
+        min =
+            Math.min(
+                min,
+                c.low
+            );
 
+        max =
+            Math.max(
+                max,
+                c.high
+            );
 
-            maxPrice =
-                Math.max(
-                    maxPrice,
-                    candle.high
-                );
-
-        }
-    );
+    });
 
 
     let range =
-        maxPrice -
-        minPrice;
+        max - min;
 
 
     if (
@@ -1149,42 +694,27 @@ function drawCandles() {
 
         range =
             Math.max(
-                Math.abs(
-                    maxPrice
-                ) * 0.001,
+                Math.abs(max) *
+                0.001,
                 1
             );
-
     }
 
 
-    minPrice -=
+    const padding =
         range * 0.12;
 
-    maxPrice +=
-        range * 0.12;
-
+    min -= padding;
+    max += padding;
 
     range =
-        maxPrice -
-        minPrice;
+        max - min;
 
 
-    /*
-     * CHART AREA
-     */
-
-    const left =
-        8;
-
-    const right =
-        55;
-
-    const top =
-        8;
-
-    const bottom =
-        10;
+    const left = 8;
+    const right = 52;
+    const top = 8;
+    const bottom = 10;
 
 
     const chartWidth =
@@ -1192,39 +722,31 @@ function drawCandles() {
         left -
         right;
 
-
     const chartHeight =
         height -
         top -
         bottom;
 
 
-    /*
-     * PRICE TO Y
-     */
+    const priceToY =
+        price =>
 
-    function priceToY(
-        price
-    ) {
-
-        return (
             top +
             (
-                (maxPrice - price) /
+                (max - price) /
                 range
             ) *
-            chartHeight
-        );
-
-    }
+            chartHeight;
 
 
-    /*
-     * GRID
-     */
+    /* =========================================
+       GRID
+       ========================================= */
 
-    ctx.lineWidth =
-        1;
+    ctx.strokeStyle =
+        "rgba(148,163,184,0.09)";
+
+    ctx.lineWidth = 1;
 
 
     for (
@@ -1236,47 +758,38 @@ function drawCandles() {
         const y =
             top +
             (
-                chartHeight /
-                4
+                chartHeight / 4
             ) *
             i;
 
-
         ctx.beginPath();
-
 
         ctx.moveTo(
             left,
             y
         );
 
-
         ctx.lineTo(
             width - right,
             y
         );
 
-
-        ctx.strokeStyle =
-            "rgba(148,163,184,0.09)";
-
-
         ctx.stroke();
-
     }
 
 
-    /*
-     * PRICE LABEL
-     */
+    /* =========================================
+       PRICE LABELS
+       ========================================= */
 
     ctx.font =
-        "9px Poppins, Arial, sans-serif";
+        "9px Poppins, Arial";
 
+    ctx.fillStyle =
+        "rgba(148,163,184,0.75)";
 
     ctx.textAlign =
         "left";
-
 
     ctx.textBaseline =
         "middle";
@@ -1291,69 +804,46 @@ function drawCandles() {
         const ratio =
             i / 4;
 
-
-        const price =
-            maxPrice -
+        const value =
+            max -
             range * ratio;
-
 
         const y =
             top +
             chartHeight *
             ratio;
 
-
-        ctx.fillStyle =
-            "rgba(148,163,184,0.65)";
-
-
         ctx.fillText(
-            formatChartPrice(
-                price
+            money(
+                value,
+                product().decimals
             ),
-            width - right + 7,
+            width - right + 6,
             y
         );
-
     }
 
 
-    /*
-     * CANDLE SIZE
-     */
-
-    const count =
-        candles.length;
-
+    /* =========================================
+       DENSE CANDLES
+       ========================================= */
 
     const slot =
         chartWidth /
-        count;
-
-
-    /*
-     * Banyak candle kecil
-     */
+        candles.length;
 
     const bodyWidth =
         Math.max(
             2,
             Math.min(
                 6,
-                slot * 0.45
+                slot * 0.48
             )
         );
 
 
-    /*
-     * DRAW CANDLES
-     */
-
     candles.forEach(
-        (
-            candle,
-            index
-        ) => {
+        (candle, index) => {
 
             const x =
                 left +
@@ -1366,18 +856,15 @@ function drawCandles() {
                     candle.open
                 );
 
-
             const closeY =
                 priceToY(
                     candle.close
                 );
 
-
             const highY =
                 priceToY(
                     candle.high
                 );
-
 
             const lowY =
                 priceToY(
@@ -1395,46 +882,35 @@ function drawCandles() {
                     ? "#34d399"
                     : "#f87171";
 
-
             const wickColor =
                 bullish
                     ? "#6ee7b7"
                     : "#fb7185";
 
 
-            /*
-             * WICK
-             */
+            /* WICK */
 
             ctx.beginPath();
-
 
             ctx.moveTo(
                 x,
                 highY
             );
 
-
             ctx.lineTo(
                 x,
                 lowY
             );
 
-
             ctx.strokeStyle =
                 wickColor;
 
-
-            ctx.lineWidth =
-                1;
-
+            ctx.lineWidth = 1;
 
             ctx.stroke();
 
 
-            /*
-             * BODY
-             */
+            /* BODY */
 
             let bodyTop =
                 Math.min(
@@ -1442,26 +918,18 @@ function drawCandles() {
                     closeY
                 );
 
-
-            let bodyBottom =
-                Math.max(
-                    openY,
-                    closeY
-                );
-
-
             let bodyHeight =
-                bodyBottom -
-                bodyTop;
+                Math.abs(
+                    closeY -
+                    openY
+                );
 
 
             if (
                 bodyHeight < 2
             ) {
 
-                bodyHeight =
-                    2;
-
+                bodyHeight = 2;
 
                 bodyTop =
                     (
@@ -1469,13 +937,11 @@ function drawCandles() {
                         closeY
                     ) / 2 -
                     1;
-
             }
 
 
             ctx.fillStyle =
                 bodyColor;
-
 
             ctx.fillRect(
                 x -
@@ -1487,14 +953,13 @@ function drawCandles() {
 
                 bodyHeight
             );
-
         }
     );
 
 
-    /*
-     * CURRENT PRICE LINE
-     */
+    /* =========================================
+       CURRENT PRICE LINE
+       ========================================= */
 
     if (
         Number.isFinite(
@@ -1502,123 +967,63 @@ function drawCandles() {
         )
     ) {
 
-        const currentY =
+        const y =
             priceToY(
                 state.lastTrade
             );
 
-
         ctx.beginPath();
-
 
         ctx.moveTo(
             left,
-            currentY
+            y
         );
-
 
         ctx.lineTo(
             width - right,
-            currentY
+            y
         );
 
+        ctx.setLineDash(
+            [4, 4]
+        );
 
         ctx.strokeStyle =
             "rgba(255,255,255,0.20)";
 
-
-        ctx.lineWidth =
-            1;
-
-
-        ctx.setLineDash(
-            [3, 3]
-        );
-
-
         ctx.stroke();
 
-
-        ctx.setLineDash(
-            []
-        );
-
+        ctx.setLineDash([]);
     }
-
 }
 
 
 /* =========================================================
-   CALCULATE RISK
+   RISK CALCULATION
    ========================================================= */
 
 function calculateRisk() {
 
-    /*
-     * EQUITY
-     */
-
     const equity =
-        parseNumber(
-            $("equity")?.value
-        );
-
-
-    /*
-     * LOT
-     */
+        num("equity");
 
     const lot =
         Math.floor(
-            parseNumber(
-                $("lot")?.value
-            )
+            num("lot")
         );
-
-
-    /*
-     * MR DAILY
-     */
 
     const mr =
-        parseNumber(
-            $("margin-required")?.value
-        );
-
-
-    /*
-     * OPEN PRICE
-     */
+        num("margin-required");
 
     const open =
-        parseNumber(
-            $("open-price")?.value
-        );
+        num("open-price");
 
-
-    /*
-     * Reset kalau data belum lengkap
-     */
 
     if (
         equity <= 0 ||
         lot <= 0 ||
         mr <= 0 ||
-        open <= 0
-    ) {
-
-        resetRiskOutput();
-
-        return;
-
-    }
-
-
-    /*
-     * Market belum tersedia
-     */
-
-    if (
+        open <= 0 ||
         !Number.isFinite(
             state.sell
         ) ||
@@ -1626,53 +1031,13 @@ function calculateRisk() {
             state.buy
         )
     ) {
-
         return;
-
     }
 
 
-    const product =
-        getProduct();
+    const p =
+        product();
 
-
-    /*
-     * CONTRACT SIZE PER LOT
-     *
-     * GOLD       = $100
-     * HANG SENG  = $5
-     * NIKKEI     = $5
-     */
-
-    const contractSizePerLot =
-        product.contractSize;
-
-
-    /*
-     * TOTAL CONTRACT SIZE
-     *
-     * Gold 2 lot = $200
-     * Gold 5 lot = $500
-     * HKK 2 lot = $10
-     * Nikkei 2 lot = $10
-     */
-
-    const totalContractSize =
-        contractSizePerLot *
-        lot;
-
-
-    /*
-     * =====================================================
-     * CLOSE PRICE
-     *
-     * BUY:
-     * posisi ditutup menggunakan BID / SELL
-     *
-     * SELL:
-     * posisi ditutup menggunakan ASK / BUY
-     * =====================================================
-     */
 
     const closePrice =
         state.position === "BUY"
@@ -1680,81 +1045,36 @@ function calculateRisk() {
             : state.buy;
 
 
-    /*
-     * =====================================================
-     * FLOATING P/L
-     * =====================================================
-     */
-
-    let floatingPL;
-
-
-    if (
+    const floatingPL =
         state.position === "BUY"
-    ) {
 
-        floatingPL =
-            (
+            ? (
                 closePrice -
                 open
             ) *
-            totalContractSize;
+            lot *
+            p.contractSize
 
-    }
-
-    else {
-
-        floatingPL =
-            (
+            : (
                 open -
                 closePrice
             ) *
-            totalContractSize;
+            lot *
+            p.contractSize;
 
-    }
-
-
-    /*
-     * =====================================================
-     * RUNNING EQUITY
-     * =====================================================
-     */
 
     const runningEquity =
         equity +
         floatingPL;
 
 
-    /*
-     * =====================================================
-     * EFFECTIVE MARGIN
-     * =====================================================
-     */
-
-    const effectiveMargin =
-        mr;
-
-
-    /*
-     * =====================================================
-     * EQUITY RATIO
-     * =====================================================
-     */
-
     const equityRatio =
-        effectiveMargin > 0
-            ? (
-                runningEquity /
-                effectiveMargin
-            ) * 100
-            : 0;
+        (
+            runningEquity /
+            mr
+        ) *
+        100;
 
-
-    /*
-     * =====================================================
-     * OUTPUT
-     * =====================================================
-     */
 
     setText(
         "floating-pl",
@@ -1763,7 +1083,6 @@ function calculateRisk() {
         )
     );
 
-
     setText(
         "running-equity",
         money(
@@ -1771,14 +1090,12 @@ function calculateRisk() {
         )
     );
 
-
     setText(
         "effective-margin",
         money(
-            effectiveMargin
+            mr
         )
     );
-
 
     setText(
         "equity-ratio",
@@ -1788,188 +1105,90 @@ function calculateRisk() {
     );
 
 
-    /*
-     * =====================================================
-     * CALL MARGIN
-     *
-     * Kerugian = 85% dari equity awal.
-     *
-     * Artinya equity tersisa 15%.
-     * =====================================================
-     */
+    /* CALL MARGIN */
 
-    const callLoss =
-        equity *
-        0.85;
+    const callMovement =
+        (
+            equity * 0.85
+        ) /
+        (
+            lot *
+            p.contractSize
+        );
 
 
-    /*
-     * =====================================================
-     * AUTO LIQUIDATION
-     *
-     * Kerugian = 100% equity awal.
-     * =====================================================
-     */
+    /* AUTO LIQUIDATION */
 
-    const liquidationLoss =
-        equity;
+    const liquidationMovement =
+        equity /
+        (
+            lot *
+            p.contractSize
+        );
 
 
-    /*
-     * =====================================================
-     * PERGERAKAN HARGA
-     * =====================================================
-     */
-
-    const movementCall =
-        callLoss /
-        totalContractSize;
-
-
-    const movementLiquidation =
-        liquidationLoss /
-        totalContractSize;
-
-
-    let callPrice;
-
-    let liquidationPrice;
-
-
-    /*
-     * =====================================================
-     * THRESHOLD MARKET PRICE
-     *
-     * Spread ikut dihitung.
-     * =====================================================
-     */
-
-    const halfSpread =
-        product.spread /
-        2;
-
-
-    if (
+    const callPrice =
         state.position === "BUY"
-    ) {
 
-        /*
-         * BUY rugi ketika BID turun.
-         *
-         * BID = Market - Half Spread
-         *
-         * Jadi Market Call:
-         *
-         * Open - Movement + Half Spread
-         */
+            ? open -
+              callMovement
 
-        callPrice =
-            open -
-            movementCall +
-            halfSpread;
+            : open +
+              callMovement;
 
 
-        liquidationPrice =
-            open -
-            movementLiquidation +
-            halfSpread;
+    const liquidationPrice =
+        state.position === "BUY"
 
-    }
+            ? open -
+              liquidationMovement
 
-    else {
+            : open +
+              liquidationMovement;
 
-        /*
-         * SELL rugi ketika ASK naik.
-         *
-         * ASK = Market + Half Spread
-         *
-         * Jadi Market Call:
-         *
-         * Open + Movement - Half Spread
-         */
-
-        callPrice =
-            open +
-            movementCall -
-            halfSpread;
-
-
-        liquidationPrice =
-            open +
-            movementLiquidation -
-            halfSpread;
-
-    }
-
-
-    /*
-     * =====================================================
-     * CALL / LIQUIDATION OUTPUT
-     * =====================================================
-     */
 
     setText(
         "call-price",
         money(
             callPrice,
-            product.decimals
+            p.decimals
         )
     );
-
 
     setText(
         "liquidation-price",
         money(
             liquidationPrice,
-            product.decimals
+            p.decimals
         )
     );
 
 
-    /*
-     * =====================================================
-     * STATUS
-     * =====================================================
-     */
-
-    const callHit =
-        runningEquity <=
-        equity * 0.15;
-
-
-    const liquidationHit =
-        runningEquity <=
-        0;
-
-
     setText(
         "call-status",
-        callHit
+        runningEquity <=
+            equity * 0.15
+
             ? "TERCAPAI"
+
             : "NORMAL"
     );
 
 
     setText(
         "liquidation-status",
-        liquidationHit
+        runningEquity <= 0
+
             ? "TERCAPAI"
+
             : "NORMAL"
     );
 
 
-    /*
-     * =====================================================
-     * TAMBAHAN DANA
-     *
-     * Target Equity = MR Daily × 350%
-     * =====================================================
-     */
+    /* TAMBAHAN DANA */
 
     const targetEquity =
-        mr *
-        3.5;
-
+        mr * 3.5;
 
     const additionalFund =
         Math.max(
@@ -1981,9 +1200,9 @@ function calculateRisk() {
 
     setText(
         "additional-fund",
-        `$ ${formatMoneyIndonesia(
+        money(
             additionalFund
-        )}`
+        )
     );
 
 
@@ -1998,15 +1217,10 @@ function calculateRisk() {
     );
 
 
-    /*
-     * =====================================================
-     * FUND RESILIENCE
-     * =====================================================
-     */
+    /* FUND RESILIENCE */
 
     let status =
         "SEHAT / NORMAL";
-
 
     let icon =
         "✓";
@@ -2042,18 +1256,11 @@ function calculateRisk() {
         status
     );
 
-
     setText(
         "risk-icon",
         icon
     );
 
-
-    /*
-     * =====================================================
-     * STATUS COLOR
-     * =====================================================
-     */
 
     const riskIcon =
         $("risk-icon");
@@ -2073,320 +1280,61 @@ function calculateRisk() {
 
                         : "bg-red-500/10 text-red-400"
             }`;
-
     }
-
 }
 
 
 /* =========================================================
-   RESET RISK
-   ========================================================= */
-
-function resetRiskOutput() {
-
-    setText(
-        "floating-pl",
-        "0.00"
-    );
-
-
-    setText(
-        "running-equity",
-        "0.00"
-    );
-
-
-    setText(
-        "effective-margin",
-        "0.00"
-    );
-
-
-    setText(
-        "equity-ratio",
-        "0.00%"
-    );
-
-
-    setText(
-        "call-price",
-        "0.00"
-    );
-
-
-    setText(
-        "liquidation-price",
-        "0.00"
-    );
-
-
-    setText(
-        "call-status",
-        "NORMAL"
-    );
-
-
-    setText(
-        "liquidation-status",
-        "NORMAL"
-    );
-
-
-    setText(
-        "additional-fund",
-        "0.00"
-    );
-
-
-    setText(
-        "additional-fund-message",
-        "Masukkan data nasabah"
-    );
-
-
-    setText(
-        "risk-status",
-        "SEHAT / NORMAL"
-    );
-
-
-    setText(
-        "risk-icon",
-        "✓"
-    );
-
-}
-
-
-/* =========================================================
-   FORMAT MONEY INDONESIA
-   ========================================================= */
-
-function formatMoneyIndonesia(
-    value
-) {
-
-    if (
-        !Number.isFinite(value)
-    ) {
-        return "0";
-    }
-
-
-    return Number(value).toLocaleString(
-        "id-ID",
-        {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 2
-        }
-    );
-
-}
-
-
-/* =========================================================
-   EQUITY INPUT FORMAT
-   ========================================================= */
-
-const equityInput =
-    $("equity");
-
-
-if (equityInput) {
-
-    equityInput.addEventListener(
-        "input",
-        function () {
-
-            const digits =
-                this.value.replace(
-                    /\D/g,
-                    ""
-                );
-
-
-            this.value =
-                formatThousands(
-                    digits
-                );
-
-
-            calculateRisk();
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   LOT INPUT
-   ========================================================= */
-
-const lotInput =
-    $("lot");
-
-
-if (lotInput) {
-
-    lotInput.addEventListener(
-        "input",
-        function () {
-
-            this.value =
-                this.value.replace(
-                    /\D/g,
-                    ""
-                );
-
-
-            calculateRisk();
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   MR DAILY INPUT
-   ========================================================= */
-
-const mrInput =
-    $("margin-required");
-
-
-if (mrInput) {
-
-    mrInput.addEventListener(
-        "input",
-        function () {
-
-            this.value =
-                this.value.replace(
-                    /[^0-9.]/g,
-                    ""
-                );
-
-
-            calculateRisk();
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   OPEN PRICE INPUT
-   ========================================================= */
-
-const openPriceInput =
-    $("open-price");
-
-
-if (openPriceInput) {
-
-    openPriceInput.addEventListener(
-        "input",
-        function () {
-
-            this.value =
-                this.value.replace(
-                    /[^0-9.]/g,
-                    ""
-                );
-
-
-            calculateRisk();
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   PRODUCT BUTTON
+   EVENTS
    ========================================================= */
 
 document
     .querySelectorAll(
         ".product-button"
     )
-    .forEach(
-        button => {
+    .forEach(button => {
 
-            button.addEventListener(
-                "click",
-                () => {
+        button.addEventListener(
+            "click",
+            () => {
 
-                    setProduct(
-                        button.dataset.product
-                    );
-
-                }
-            );
-
-        }
-    );
+                setProduct(
+                    button.dataset.product
+                );
+            }
+        );
+    });
 
 
-/* =========================================================
-   BUY BUTTON
-   ========================================================= */
-
-const buyButton =
-    $("buy-button");
-
-
-if (buyButton) {
-
-    buyButton.addEventListener(
+$("buy-button")
+    ?.addEventListener(
         "click",
-        () => {
-
-            setPosition(
-                "BUY"
-            );
-
-        }
+        () =>
+            setPosition("BUY")
     );
 
-}
 
-
-/* =========================================================
-   SELL BUTTON
-   ========================================================= */
-
-const sellButton =
-    $("sell-button");
-
-
-if (sellButton) {
-
-    sellButton.addEventListener(
+$("sell-button")
+    ?.addEventListener(
         "click",
-        () => {
-
-            setPosition(
-                "SELL"
-            );
-
-        }
+        () =>
+            setPosition("SELL")
     );
 
-}
 
+[
+    "equity",
+    "lot",
+    "margin-required",
+    "open-price"
+]
+.forEach(id => {
 
-/* =========================================================
-   RESIZE
-   ========================================================= */
-
-let resizeTimer =
-    null;
+    $(id)?.addEventListener(
+        "input",
+        calculateRisk
+    );
+});
 
 
 window.addEventListener(
@@ -2394,20 +1342,14 @@ window.addEventListener(
     () => {
 
         clearTimeout(
-            resizeTimer
+            window.__chartTimer
         );
 
-
-        resizeTimer =
+        window.__chartTimer =
             setTimeout(
-                () => {
-
-                    drawCandles();
-
-                },
+                drawCandles,
                 100
             );
-
     }
 );
 
@@ -2416,37 +1358,32 @@ window.addEventListener(
    START
    ========================================================= */
 
-setPosition(
-    "BUY"
-);
+setPosition("BUY");
 
-
-setProduct(
-    "gold"
-);
+setProduct("gold");
 
 
 /*
- * Polling pertama
+ * Ambil:
+ * - harga terbaru
+ * - 42 candle historis
  */
 
-fetchMarket();
+fetchMarket(true);
 
 
-/* =========================================================
-   MARKET POLLING
-   =========================================================
-
-   120 detik = 720 request/hari
-   jika halaman terus aktif.
-
-   Twelve Data Free:
-   sekitar 800 credit/day.
-
-   ========================================================= */
+/*
+ * Free Twelve Data:
+ * 800 request/hari.
+ *
+ * 120 detik = sekitar
+ * 720 request/hari.
+ */
 
 state.timer =
     setInterval(
-        fetchMarket,
+        () => {
+            fetchMarket(false);
+        },
         120000
     );
