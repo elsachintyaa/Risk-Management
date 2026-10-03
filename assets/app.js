@@ -1,6 +1,12 @@
 const API_URL = "/api/market";
 
+
+/* =========================================================
+   PRODUCTS
+   ========================================================= */
+
 const PRODUCTS = {
+
     gold: {
         name: "XAU/USD",
         label: "GOLD",
@@ -24,32 +30,92 @@ const PRODUCTS = {
         decimals: 0,
         spread: 20
     }
+
 };
 
+
+/* =========================================================
+   STATE
+   ========================================================= */
+
 const state = {
+
     product: "gold",
+
     position: "BUY",
 
     lastTrade: null,
-    sell: null,
-    buy: null,
-    spread: null,
 
     previousPrice: null,
 
+    sell: null,
+
+    buy: null,
+
+    spread: 0.80,
+
     candles: [],
 
-    // 1 candle = 1 menit
-    candleIntervalMs: 60000,
+    candleIntervalMs: 5 * 60 * 1000,
 
     timer: null,
+
     requestInProgress: false
+
 };
 
-const $ = id =>
-    document.getElementById(id);
 
-function money(value, decimals = 2) {
+/* =========================================================
+   DOM HELPER
+   ========================================================= */
+
+const $ = id => {
+    return document.getElementById(id);
+};
+
+
+function setText(id, value) {
+
+    const element = $(id);
+
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+
+function numberValue(id) {
+
+    const element = $(id);
+
+    if (!element) {
+        return 0;
+    }
+
+    const value =
+        Number.parseFloat(element.value);
+
+    return Number.isFinite(value)
+        ? value
+        : 0;
+}
+
+
+function currentProduct() {
+
+    return PRODUCTS[state.product];
+
+}
+
+
+/* =========================================================
+   NUMBER FORMAT
+   ========================================================= */
+
+function formatNumber(
+    value,
+    decimals = 2
+) {
 
     if (!Number.isFinite(value)) {
         return "0.00";
@@ -64,76 +130,62 @@ function money(value, decimals = 2) {
     );
 }
 
-function num(id) {
-
-    const el = $(id);
-
-    if (!el) {
-        return 0;
-    }
-
-    const value =
-        Number.parseFloat(el.value);
-
-    return Number.isFinite(value)
-        ? value
-        : 0;
-}
-
-function setText(id, value) {
-
-    const el = $(id);
-
-    if (el) {
-        el.textContent = value;
-    }
-}
-
-function product() {
-    return PRODUCTS[state.product];
-}
-
 
 /* =========================================================
-   PRODUCT
+   PRODUCT BUTTON
    ========================================================= */
 
-function setProduct(name) {
+function setProduct(productName) {
 
-    if (!PRODUCTS[name]) {
+    if (!PRODUCTS[productName]) {
         return;
     }
 
-    state.product = name;
+    state.product = productName;
+
+    const product =
+        currentProduct();
+
+
+    /* Reset market state */
 
     state.lastTrade = null;
+
     state.previousPrice = null;
+
     state.sell = null;
+
     state.buy = null;
 
     state.spread =
-        PRODUCTS[name].spread;
+        product.spread;
 
     state.candles = [];
 
-    const p = product();
+
+    /* Instrument */
 
     setText(
         "instrument-name",
-        p.name
+        product.name
     );
 
     setText(
         "chart-symbol",
-        p.name
+        product.name
     );
+
+
+    /* Product button */
 
     document
         .querySelectorAll(".product-button")
         .forEach(button => {
 
             const active =
-                button.dataset.product === name;
+                button.dataset.product ===
+                productName;
+
 
             button.classList.toggle(
                 "border-amber-400",
@@ -154,55 +206,73 @@ function setProduct(name) {
                 "bg-slate-800",
                 !active
             );
+
         });
+
+
+    /* Spread */
 
     setText(
         "market-update",
-        `SPREAD ${money(
-            p.spread,
-            p.decimals
+        `SPREAD ${formatNumber(
+            product.spread,
+            product.decimals
         )}`
     );
 
+
     drawCandles();
 
+
+    /* Load price + historical candles */
+
     fetchMarket(true);
+
 }
 
 
 /* =========================================================
-   POSITION
+   BUY / SELL
    ========================================================= */
 
 function setPosition(position) {
 
     state.position = position;
 
-    const buy =
+
+    const buyButton =
         $("buy-button");
 
-    const sell =
+    const sellButton =
         $("sell-button");
 
-    if (!buy || !sell) {
+
+    if (!buyButton || !sellButton) {
         return;
     }
 
-    buy.className =
-        position === "BUY"
 
-            ? "rounded-2xl border border-emerald-400 bg-emerald-500/20 px-4 py-4 text-sm font-bold text-emerald-400"
+    if (position === "BUY") {
 
-            : "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
+        buyButton.className =
+            "rounded-2xl border border-emerald-400 bg-emerald-500/20 px-4 py-4 text-sm font-bold text-emerald-400";
 
-    sell.className =
-        position === "SELL"
+        sellButton.className =
+            "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
 
-            ? "rounded-2xl border border-red-400 bg-red-500/20 px-4 py-4 text-sm font-bold text-red-400"
+    } else {
 
-            : "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
+        buyButton.className =
+            "rounded-2xl border border-white/10 bg-slate-800 px-4 py-4 text-sm font-bold text-slate-400";
+
+        sellButton.className =
+            "rounded-2xl border border-red-400 bg-red-500/20 px-4 py-4 text-sm font-bold text-red-400";
+
+    }
+
 
     calculateRisk();
+
 }
 
 
@@ -218,17 +288,30 @@ async function fetchMarket(
         return;
     }
 
+
     state.requestInProgress = true;
+
 
     try {
 
-        const p = product();
+        const product =
+            currentProduct();
 
-        const url =
+
+        let url =
             `${API_URL}` +
-            `?symbol=${encodeURIComponent(p.name)}` +
-            `${loadHistory ? "&history=1" : ""}` +
-            `&_=${Date.now()}`;
+            `?symbol=${encodeURIComponent(
+                product.name
+            )}`;
+
+
+        if (loadHistory) {
+            url += "&history=1";
+        }
+
+
+        url += `&_=${Date.now()}`;
+
 
         const response =
             await fetch(
@@ -238,87 +321,170 @@ async function fetchMarket(
                 }
             );
 
+
         const data =
             await response.json();
+
 
         if (
             !response.ok ||
             !data.success
         ) {
+
             throw new Error(
                 data.message ||
                 `HTTP ${response.status}`
             );
+
         }
+
 
         const price =
             Number(data.price);
 
+
         if (!Number.isFinite(price)) {
+
             throw new Error(
                 "Harga market tidak valid"
             );
+
         }
 
 
-        /* =========================================
-           LOAD REAL HISTORICAL CANDLES
-           ========================================= */
+        /* =================================================
+           LOAD HISTORICAL CANDLES
+           ================================================= */
 
         if (
             loadHistory &&
             Array.isArray(data.candles) &&
-            data.candles.length
+            data.candles.length > 0
         ) {
 
             state.candles =
                 data.candles
-                    .map(c => ({
-                        time: c.time,
-                        open: Number(c.open),
-                        high: Number(c.high),
-                        low: Number(c.low),
-                        close: Number(c.close)
-                    }))
-                    .filter(c =>
-                        Number.isFinite(c.open) &&
-                        Number.isFinite(c.high) &&
-                        Number.isFinite(c.low) &&
-                        Number.isFinite(c.close)
+                    .map(candle => {
+
+                        let time =
+                            candle.time;
+
+
+                        /*
+                         * Twelve Data:
+                         * YYYY-MM-DD HH:mm:ss
+                         */
+
+                        if (
+                            typeof time === "string"
+                        ) {
+
+                            const parsed =
+                                Date.parse(
+                                    time.replace(
+                                        " ",
+                                        "T"
+                                    )
+                                );
+
+
+                            if (
+                                Number.isFinite(
+                                    parsed
+                                )
+                            ) {
+
+                                time = parsed;
+
+                            }
+
+                        }
+
+
+                        return {
+
+                            time,
+
+                            open:
+                                Number(
+                                    candle.open
+                                ),
+
+                            high:
+                                Number(
+                                    candle.high
+                                ),
+
+                            low:
+                                Number(
+                                    candle.low
+                                ),
+
+                            close:
+                                Number(
+                                    candle.close
+                                )
+
+                        };
+
+                    })
+                    .filter(candle =>
+                        Number.isFinite(
+                            candle.open
+                        ) &&
+                        Number.isFinite(
+                            candle.high
+                        ) &&
+                        Number.isFinite(
+                            candle.low
+                        ) &&
+                        Number.isFinite(
+                            candle.close
+                        )
                     )
-                    .slice(-42);
+                    .slice(-48);
+
         }
 
 
+        /* Update market */
+
         updateMarket(price);
 
-    }
 
-    catch (error) {
+    } catch (error) {
 
         console.error(
             "Market Error:",
             error
         );
 
-        // Tetap tampilkan spread,
-        // jangan menimpa UI dengan SELL/BUY.
+
+        /*
+         * Jangan menghilangkan UI.
+         * Tetap tampilkan spread.
+         */
+
+        const product =
+            currentProduct();
+
 
         setText(
             "market-update",
-            `SPREAD ${money(
-                product().spread,
-                product().decimals
+            `SPREAD ${formatNumber(
+                product.spread,
+                product.decimals
             )}`
         );
 
-    }
 
-    finally {
+    } finally {
 
         state.requestInProgress =
             false;
+
     }
+
 }
 
 
@@ -328,122 +494,176 @@ async function fetchMarket(
 
 function updateMarket(price) {
 
-    const p =
-        product();
+    const product =
+        currentProduct();
+
+
+    /* Previous */
 
     state.previousPrice =
         state.lastTrade;
 
+
+    /* Current */
+
     state.lastTrade =
         price;
 
+
+    /* Spread */
+
     state.spread =
-        p.spread;
+        product.spread;
+
+
+    /* Bid / Ask */
 
     state.sell =
         price -
-        p.spread / 2;
+        product.spread / 2;
+
 
     state.buy =
         price +
-        p.spread / 2;
+        product.spread / 2;
 
 
-    const difference =
-        state.previousPrice === null
-            ? 0
-            : price -
-              state.previousPrice;
+    /* =====================================================
+       PRICE CHANGE
+       ===================================================== */
+
+    let change = 0;
 
 
-    /* =========================================
-       PRICE
-       ========================================= */
+    if (
+        state.previousPrice !== null
+    ) {
+
+        change =
+            price -
+            state.previousPrice;
+
+    }
+
+
+    /* =====================================================
+       MAIN PRICE
+       ===================================================== */
 
     setText(
         "market-price",
-        money(
+        formatNumber(
             price,
-            p.decimals
+            product.decimals
         )
     );
 
 
-    /* =========================================
-       CHANGE
-       ========================================= */
+    /* =====================================================
+       ARROW
+       ===================================================== */
 
-    setText(
-        "price-change",
+    let arrow = "→";
 
-        `${difference >= 0 ? "+" : ""}${
-            money(
-                difference,
-                p.decimals
-            )
-        }`
-    );
+
+    if (change > 0) {
+        arrow = "↑";
+    }
+
+    if (change < 0) {
+        arrow = "↓";
+    }
 
 
     setText(
         "price-arrow",
-
-        difference > 0
-            ? "↑"
-            : difference < 0
-                ? "↓"
-                : "→"
+        arrow
     );
 
 
-    const arrow =
-        $("price-arrow");
-
-    if (arrow) {
-
-        arrow.className =
-            `text-sm font-bold ${
-                difference > 0
-                    ? "text-emerald-400"
-                    : difference < 0
-                        ? "text-red-400"
-                        : "text-slate-400"
-            }`;
-    }
-
-
-    /* =========================================
-       ONLY SPREAD
-       ========================================= */
+    /* =====================================================
+       PRICE CHANGE
+       ===================================================== */
 
     setText(
-        "market-update",
-        `SPREAD ${money(
-            state.spread,
-            p.decimals
+        "price-change",
+
+        `${change >= 0 ? "+" : ""}${formatNumber(
+            change,
+            product.decimals
         )}`
     );
 
 
-    /* =========================================
-       CANDLE
-       ========================================= */
+    const arrowElement =
+        $("price-arrow");
+
+
+    if (arrowElement) {
+
+        if (change > 0) {
+
+            arrowElement.className =
+                "text-sm font-bold text-emerald-400";
+
+        } else if (change < 0) {
+
+            arrowElement.className =
+                "text-sm font-bold text-red-400";
+
+        } else {
+
+            arrowElement.className =
+                "text-sm font-bold text-slate-400";
+
+        }
+
+    }
+
+
+    /* =====================================================
+       SPREAD ONLY
+       
+       Tidak menampilkan:
+       SELL
+       LAST TRADE
+       BUY
+       ===================================================== */
+
+    setText(
+        "market-update",
+        `SPREAD ${formatNumber(
+            product.spread,
+            product.decimals
+        )}`
+    );
+
+
+    /* =====================================================
+       UPDATE CURRENT CANDLE
+       ===================================================== */
 
     updateCurrentCandle(price);
+
+
+    /* =====================================================
+       DRAW
+       ===================================================== */
 
     drawCandles();
 
 
-    /* =========================================
+    /* =====================================================
        RISK
-       ========================================= */
+       ===================================================== */
 
     calculateRisk();
+
 }
 
 
 /* =========================================================
-   CURRENT CANDLE
+   CURRENT 5 MINUTE CANDLE
    ========================================================= */
 
 function updateCurrentCandle(price) {
@@ -452,8 +672,14 @@ function updateCurrentCandle(price) {
         return;
     }
 
+
     const now =
         Date.now();
+
+
+    /*
+     * Membulatkan waktu ke candle 5 menit.
+     */
 
     const bucket =
         Math.floor(
@@ -469,9 +695,9 @@ function updateCurrentCandle(price) {
         ];
 
 
-    /* =========================================
-       NORMALIZE HISTORICAL TIME
-       ========================================= */
+    /* =====================================================
+       NORMALIZE LAST CANDLE TIME
+       ===================================================== */
 
     if (
         candle &&
@@ -486,17 +712,43 @@ function updateCurrentCandle(price) {
                 )
             );
 
+
         if (
             Number.isFinite(parsed)
         ) {
-            candle.time = parsed;
+
+            candle.time =
+                parsed;
+
         }
+
     }
 
 
-    /* =========================================
+    /* =====================================================
+       CONVERT NUMBER
+       ===================================================== */
+
+    if (candle) {
+
+        candle.open =
+            Number(candle.open);
+
+        candle.high =
+            Number(candle.high);
+
+        candle.low =
+            Number(candle.low);
+
+        candle.close =
+            Number(candle.close);
+
+    }
+
+
+    /* =====================================================
        NEW CANDLE
-       ========================================= */
+       ===================================================== */
 
     if (
         !candle ||
@@ -505,18 +757,20 @@ function updateCurrentCandle(price) {
 
         const open =
             candle &&
-            Number.isFinite(candle.close)
+            Number.isFinite(
+                candle.close
+            )
 
                 ? candle.close
 
                 : price;
 
 
-        candle = {
+        const newCandle = {
 
             time: bucket,
 
-            open,
+            open: open,
 
             high:
                 Math.max(
@@ -531,29 +785,32 @@ function updateCurrentCandle(price) {
                 ),
 
             close: price
+
         };
 
 
         state.candles.push(
-            candle
+            newCandle
         );
 
 
         if (
-            state.candles.length >
-            42
+            state.candles.length > 48
         ) {
 
             state.candles.shift();
+
         }
 
+
         return;
+
     }
 
 
-    /* =========================================
+    /* =====================================================
        UPDATE CURRENT CANDLE
-       ========================================= */
+       ===================================================== */
 
     candle.high =
         Math.max(
@@ -561,19 +818,22 @@ function updateCurrentCandle(price) {
             price
         );
 
+
     candle.low =
         Math.min(
             candle.low,
             price
         );
 
+
     candle.close =
         price;
+
 }
 
 
 /* =========================================================
-   DRAW CANDLE
+   DRAW CANDLE CHART
    ========================================================= */
 
 function drawCandles() {
@@ -581,19 +841,27 @@ function drawCandles() {
     const container =
         $("market-chart");
 
+
     if (!container) {
         return;
     }
+
 
     container.innerHTML = "";
 
 
     if (
-        !state.candles.length
+        state.candles.length === 0
     ) {
+
         return;
+
     }
 
+
+    /* =====================================================
+       SIZE
+       ===================================================== */
 
     const width =
         Math.max(
@@ -601,39 +869,51 @@ function drawCandles() {
             280
         );
 
+
     const height =
         Math.max(
             container.clientHeight || 190,
             170
         );
 
+
     const dpr =
         window.devicePixelRatio || 1;
 
+
+    /* =====================================================
+       CANVAS
+       ===================================================== */
 
     const canvas =
         document.createElement(
             "canvas"
         );
 
+
     canvas.style.width =
         "100%";
+
 
     canvas.style.height =
         "100%";
 
+
     canvas.style.display =
         "block";
+
 
     canvas.width =
         Math.floor(
             width * dpr
         );
 
+
     canvas.height =
         Math.floor(
             height * dpr
         );
+
 
     container.appendChild(
         canvas
@@ -645,6 +925,7 @@ function drawCandles() {
             "2d"
         );
 
+
     ctx.setTransform(
         dpr,
         0,
@@ -655,29 +936,39 @@ function drawCandles() {
     );
 
 
-    const candles =
-        state.candles.slice(-42);
+    /* =====================================================
+       CANDLES
+       ===================================================== */
 
+    const candles =
+        state.candles.slice(-48);
+
+
+    /* =====================================================
+       FIND RANGE
+       ===================================================== */
 
     let min =
         Infinity;
+
 
     let max =
         -Infinity;
 
 
-    candles.forEach(c => {
+    candles.forEach(candle => {
 
         min =
             Math.min(
                 min,
-                c.low
+                candle.low
             );
+
 
         max =
             Math.max(
                 max,
-                c.high
+                candle.high
             );
 
     });
@@ -694,26 +985,40 @@ function drawCandles() {
 
         range =
             Math.max(
-                Math.abs(max) *
-                0.001,
+                Math.abs(max) * 0.001,
                 1
             );
+
     }
 
+
+    /* =====================================================
+       PADDING
+       ===================================================== */
 
     const padding =
         range * 0.12;
 
+
     min -= padding;
+
     max += padding;
+
 
     range =
         max - min;
 
 
+    /* =====================================================
+       CHART AREA
+       ===================================================== */
+
     const left = 8;
+
     const right = 52;
+
     const top = 8;
+
     const bottom = 10;
 
 
@@ -722,29 +1027,38 @@ function drawCandles() {
         left -
         right;
 
+
     const chartHeight =
         height -
         top -
         bottom;
 
 
-    const priceToY =
-        price =>
+    /* =====================================================
+       PRICE → Y
+       ===================================================== */
 
+    function priceToY(price) {
+
+        return (
             top +
             (
                 (max - price) /
                 range
             ) *
-            chartHeight;
+            chartHeight
+        );
+
+    }
 
 
-    /* =========================================
+    /* =====================================================
        GRID
-       ========================================= */
+       ===================================================== */
 
     ctx.strokeStyle =
         "rgba(148,163,184,0.09)";
+
 
     ctx.lineWidth = 1;
 
@@ -762,37 +1076,49 @@ function drawCandles() {
             ) *
             i;
 
+
         ctx.beginPath();
+
 
         ctx.moveTo(
             left,
             y
         );
 
+
         ctx.lineTo(
             width - right,
             y
         );
 
+
         ctx.stroke();
+
     }
 
 
-    /* =========================================
+    /* =====================================================
        PRICE LABELS
-       ========================================= */
+       ===================================================== */
 
     ctx.font =
         "9px Poppins, Arial";
 
+
     ctx.fillStyle =
         "rgba(148,163,184,0.75)";
+
 
     ctx.textAlign =
         "left";
 
+
     ctx.textBaseline =
         "middle";
+
+
+    const product =
+        currentProduct();
 
 
     for (
@@ -804,46 +1130,66 @@ function drawCandles() {
         const ratio =
             i / 4;
 
+
         const value =
             max -
             range * ratio;
+
 
         const y =
             top +
             chartHeight *
             ratio;
 
+
         ctx.fillText(
-            money(
+            formatNumber(
                 value,
-                product().decimals
+                product.decimals
             ),
             width - right + 6,
             y
         );
+
     }
 
 
-    /* =========================================
-       DENSE CANDLES
-       ========================================= */
+    /* =====================================================
+       CANDLE WIDTH
+       ===================================================== */
 
     const slot =
         chartWidth /
         candles.length;
 
+
+    /*
+     * Sedikit lebih lebar supaya body candle
+     * tetap kelihatan.
+     */
+
     const bodyWidth =
         Math.max(
-            2,
+            3,
             Math.min(
-                6,
-                slot * 0.48
+                7,
+                slot * 0.58
             )
         );
 
 
+    /* =====================================================
+       DRAW CANDLES
+       ===================================================== */
+
     candles.forEach(
-        (candle, index) => {
+        candle => {
+
+            const index =
+                candles.indexOf(
+                    candle
+                );
+
 
             const x =
                 left +
@@ -856,15 +1202,18 @@ function drawCandles() {
                     candle.open
                 );
 
+
             const closeY =
                 priceToY(
                     candle.close
                 );
 
+
             const highY =
                 priceToY(
                     candle.high
                 );
+
 
             const lowY =
                 priceToY(
@@ -882,41 +1231,52 @@ function drawCandles() {
                     ? "#34d399"
                     : "#f87171";
 
+
             const wickColor =
                 bullish
                     ? "#6ee7b7"
                     : "#fb7185";
 
 
-            /* WICK */
+            /* =================================================
+               WICK
+               ================================================= */
 
             ctx.beginPath();
+
 
             ctx.moveTo(
                 x,
                 highY
             );
 
+
             ctx.lineTo(
                 x,
                 lowY
             );
 
+
             ctx.strokeStyle =
                 wickColor;
 
+
             ctx.lineWidth = 1;
+
 
             ctx.stroke();
 
 
-            /* BODY */
+            /* =================================================
+               BODY
+               ================================================= */
 
             let bodyTop =
                 Math.min(
                     openY,
                     closeY
                 );
+
 
             let bodyHeight =
                 Math.abs(
@@ -925,25 +1285,35 @@ function drawCandles() {
                 );
 
 
+            /*
+             * Body minimal 3px supaya
+             * candle tidak terlihat seperti garis.
+             */
+
             if (
-                bodyHeight < 2
+                bodyHeight < 3
             ) {
 
-                bodyHeight = 2;
+                bodyHeight = 3;
+
 
                 bodyTop =
                     (
                         openY +
                         closeY
-                    ) / 2 -
-                    1;
+                    ) /
+                    2 -
+                    1.5;
+
             }
 
 
             ctx.fillStyle =
                 bodyColor;
 
+
             ctx.fillRect(
+
                 x -
                 bodyWidth / 2,
 
@@ -952,14 +1322,16 @@ function drawCandles() {
                 bodyWidth,
 
                 bodyHeight
+
             );
+
         }
     );
 
 
-    /* =========================================
+    /* =====================================================
        CURRENT PRICE LINE
-       ========================================= */
+       ===================================================== */
 
     if (
         Number.isFinite(
@@ -972,29 +1344,41 @@ function drawCandles() {
                 state.lastTrade
             );
 
+
         ctx.beginPath();
+
 
         ctx.moveTo(
             left,
             y
         );
 
+
         ctx.lineTo(
             width - right,
             y
         );
 
+
         ctx.setLineDash(
             [4, 4]
         );
 
+
         ctx.strokeStyle =
             "rgba(255,255,255,0.20)";
 
+
+        ctx.lineWidth = 1;
+
+
         ctx.stroke();
 
+
         ctx.setLineDash([]);
+
     }
+
 }
 
 
@@ -1005,25 +1389,37 @@ function drawCandles() {
 function calculateRisk() {
 
     const equity =
-        num("equity");
+        numberValue("equity");
+
 
     const lot =
         Math.floor(
-            num("lot")
+            numberValue("lot")
         );
 
-    const mr =
-        num("margin-required");
 
-    const open =
-        num("open-price");
+    const marginRequired =
+        numberValue(
+            "margin-required"
+        );
 
+
+    const openPrice =
+        numberValue(
+            "open-price"
+        );
+
+
+    /*
+     * Kalau data belum lengkap,
+     * jangan menghapus hasil sebelumnya.
+     */
 
     if (
         equity <= 0 ||
         lot <= 0 ||
-        mr <= 0 ||
-        open <= 0 ||
+        marginRequired <= 0 ||
+        openPrice <= 0 ||
         !Number.isFinite(
             state.sell
         ) ||
@@ -1031,143 +1427,230 @@ function calculateRisk() {
             state.buy
         )
     ) {
+
         return;
+
     }
 
 
-    const p =
-        product();
+    const product =
+        currentProduct();
 
 
-    const closePrice =
+    /* =====================================================
+       EXIT PRICE
+       
+       BUY  → keluar di SELL / BID
+       SELL → keluar di BUY / ASK
+       ===================================================== */
+
+    const exitPrice =
         state.position === "BUY"
             ? state.sell
             : state.buy;
 
 
-    const floatingPL =
+    /* =====================================================
+       FLOATING P/L
+       ===================================================== */
+
+    let floatingPL;
+
+
+    if (
         state.position === "BUY"
+    ) {
 
-            ? (
-                closePrice -
-                open
+        floatingPL =
+            (
+                exitPrice -
+                openPrice
             ) *
             lot *
-            p.contractSize
+            product.contractSize;
 
-            : (
-                open -
-                closePrice
+    } else {
+
+        floatingPL =
+            (
+                openPrice -
+                exitPrice
             ) *
             lot *
-            p.contractSize;
+            product.contractSize;
 
+    }
+
+
+    /* =====================================================
+       RUNNING EQUITY
+       ===================================================== */
 
     const runningEquity =
         equity +
         floatingPL;
 
 
+    /* =====================================================
+       EQUITY RATIO
+       ===================================================== */
+
     const equityRatio =
         (
             runningEquity /
-            mr
+            marginRequired
         ) *
         100;
 
 
+    /* =====================================================
+       BASIC OUTPUT
+       ===================================================== */
+
     setText(
         "floating-pl",
-        money(
+        formatNumber(
             floatingPL
         )
     );
 
+
     setText(
         "running-equity",
-        money(
+        formatNumber(
             runningEquity
         )
     );
 
+
     setText(
         "effective-margin",
-        money(
-            mr
+        formatNumber(
+            marginRequired
         )
     );
 
+
     setText(
         "equity-ratio",
-        `${money(
+        `${formatNumber(
             equityRatio
         )}%`
     );
 
 
-    /* CALL MARGIN */
+    /* =====================================================
+       CALL MARGIN
+       
+       Running Equity = 15% dari Equity awal
+       ===================================================== */
+
+    const callTargetEquity =
+        equity * 0.15;
+
+
+    const callLoss =
+        equity -
+        callTargetEquity;
+
 
     const callMovement =
-        (
-            equity * 0.85
-        ) /
+        callLoss /
         (
             lot *
-            p.contractSize
+            product.contractSize
         );
 
 
-    /* AUTO LIQUIDATION */
+    let callPrice;
+
+
+    if (
+        state.position === "BUY"
+    ) {
+
+        callPrice =
+            openPrice -
+            callMovement;
+
+    } else {
+
+        callPrice =
+            openPrice +
+            callMovement;
+
+    }
+
+
+    /* =====================================================
+       AUTO LIQUIDATION
+       
+       Running Equity = 0
+       ===================================================== */
+
+    const liquidationLoss =
+        equity;
+
 
     const liquidationMovement =
-        equity /
+        liquidationLoss /
         (
             lot *
-            p.contractSize
+            product.contractSize
         );
 
 
-    const callPrice =
+    let liquidationPrice;
+
+
+    if (
         state.position === "BUY"
+    ) {
 
-            ? open -
-              callMovement
+        liquidationPrice =
+            openPrice -
+            liquidationMovement;
 
-            : open +
-              callMovement;
+    } else {
+
+        liquidationPrice =
+            openPrice +
+            liquidationMovement;
+
+    }
 
 
-    const liquidationPrice =
-        state.position === "BUY"
-
-            ? open -
-              liquidationMovement
-
-            : open +
-              liquidationMovement;
-
+    /* =====================================================
+       PRICE OUTPUT
+       ===================================================== */
 
     setText(
         "call-price",
-        money(
+        formatNumber(
             callPrice,
-            p.decimals
+            product.decimals
         )
     );
+
 
     setText(
         "liquidation-price",
-        money(
+        formatNumber(
             liquidationPrice,
-            p.decimals
+            product.decimals
         )
     );
 
 
+    /* =====================================================
+       CALL STATUS
+       ===================================================== */
+
     setText(
         "call-status",
+
         runningEquity <=
-            equity * 0.15
+            callTargetEquity
 
             ? "TERCAPAI"
 
@@ -1175,8 +1658,13 @@ function calculateRisk() {
     );
 
 
+    /* =====================================================
+       LIQUIDATION STATUS
+       ===================================================== */
+
     setText(
         "liquidation-status",
+
         runningEquity <= 0
 
             ? "TERCAPAI"
@@ -1185,10 +1673,16 @@ function calculateRisk() {
     );
 
 
-    /* TAMBAHAN DANA */
+    /* =====================================================
+       TAMBAHAN DANA
+       
+       Target Equity = MR Daily × 350%
+       ===================================================== */
 
     const targetEquity =
-        mr * 3.5;
+        marginRequired *
+        3.5;
+
 
     const additionalFund =
         Math.max(
@@ -1200,29 +1694,44 @@ function calculateRisk() {
 
     setText(
         "additional-fund",
-        money(
+        formatNumber(
             additionalFund
         )
     );
 
 
-    setText(
-        "additional-fund-message",
-
+    if (
         additionalFund > 0
+    ) {
 
-            ? "Dana tambahan agar Equity mencapai 350% dari MR Daily."
+        setText(
+            "additional-fund-message",
+            "Dana tambahan agar Equity mencapai 350% dari MR Daily."
+        );
 
-            : "Dana tambahan tidak diperlukan."
-    );
+    } else {
+
+        setText(
+            "additional-fund-message",
+            "Dana tambahan tidak diperlukan."
+        );
+
+    }
 
 
-    /* FUND RESILIENCE */
+    /* =====================================================
+       FUND RESILIENCE
+       
+       >= 350%  SEHAT
+       > 150%   BURUK
+       <= 150%  SANGAT BURUK
+       ===================================================== */
 
-    let status =
+    let riskStatus =
         "SEHAT / NORMAL";
 
-    let icon =
+
+    let riskIcon =
         "✓";
 
 
@@ -1230,22 +1739,20 @@ function calculateRisk() {
         equityRatio <= 150
     ) {
 
-        status =
+        riskStatus =
             "SANGAT BURUK";
 
-        icon =
+        riskIcon =
             "×";
 
-    }
-
-    else if (
+    } else if (
         equityRatio < 350
     ) {
 
-        status =
+        riskStatus =
             "BURUK";
 
-        icon =
+        riskIcon =
             "!";
 
     }
@@ -1253,39 +1760,50 @@ function calculateRisk() {
 
     setText(
         "risk-status",
-        status
+        riskStatus
     );
+
 
     setText(
         "risk-icon",
-        icon
+        riskIcon
     );
 
 
-    const riskIcon =
+    const riskIconElement =
         $("risk-icon");
 
 
-    if (riskIcon) {
+    if (riskIconElement) {
 
-        riskIcon.className =
-            `flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl ${
-                equityRatio >= 350
+        if (
+            equityRatio >= 350
+        ) {
 
-                    ? "bg-emerald-500/10 text-emerald-400"
+            riskIconElement.className =
+                "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/10 text-xl text-emerald-400";
 
-                    : equityRatio > 150
+        } else if (
+            equityRatio > 150
+        ) {
 
-                        ? "bg-amber-500/10 text-amber-400"
+            riskIconElement.className =
+                "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/10 text-xl text-amber-400";
 
-                        : "bg-red-500/10 text-red-400"
-            }`;
+        } else {
+
+            riskIconElement.className =
+                "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-500/10 text-xl text-red-400";
+
+        }
+
     }
+
 }
 
 
 /* =========================================================
-   EVENTS
+   PRODUCT EVENTS
    ========================================================= */
 
 document
@@ -1301,26 +1819,44 @@ document
                 setProduct(
                     button.dataset.product
                 );
+
             }
         );
+
     });
 
 
-$("buy-button")
-    ?.addEventListener(
-        "click",
-        () =>
-            setPosition("BUY")
-    );
+/* =========================================================
+   BUY
+   ========================================================= */
+
+$("buy-button")?.addEventListener(
+    "click",
+    () => {
+
+        setPosition("BUY");
+
+    }
+);
 
 
-$("sell-button")
-    ?.addEventListener(
-        "click",
-        () =>
-            setPosition("SELL")
-    );
+/* =========================================================
+   SELL
+   ========================================================= */
 
+$("sell-button")?.addEventListener(
+    "click",
+    () => {
+
+        setPosition("SELL");
+
+    }
+);
+
+
+/* =========================================================
+   INPUT EVENTS
+   ========================================================= */
 
 [
     "equity",
@@ -1334,7 +1870,60 @@ $("sell-button")
         "input",
         calculateRisk
     );
+
 });
+
+
+/* =========================================================
+   LOT INTEGER ONLY
+   ========================================================= */
+
+$("lot")?.addEventListener(
+    "input",
+    event => {
+
+        let value =
+            event.target.value;
+
+
+        value =
+            value.replace(
+                /[^0-9]/g,
+                ""
+            );
+
+
+        if (value !== "") {
+
+            value =
+                String(
+                    Math.max(
+                        1,
+                        parseInt(
+                            value,
+                            10
+                        )
+                    )
+                );
+
+        }
+
+
+        event.target.value =
+            value;
+
+
+        calculateRisk();
+
+    }
+);
+
+
+/* =========================================================
+   RESIZE
+   ========================================================= */
+
+let chartResizeTimer = null;
 
 
 window.addEventListener(
@@ -1342,14 +1931,20 @@ window.addEventListener(
     () => {
 
         clearTimeout(
-            window.__chartTimer
+            chartResizeTimer
         );
 
-        window.__chartTimer =
+
+        chartResizeTimer =
             setTimeout(
-                drawCandles,
+                () => {
+
+                    drawCandles();
+
+                },
                 100
             );
+
     }
 );
 
@@ -1363,27 +1958,28 @@ setPosition("BUY");
 setProduct("gold");
 
 
-/*
- * Ambil:
- * - harga terbaru
- * - 42 candle historis
- */
+/* =========================================================
+   INITIAL MARKET REQUEST
+   ========================================================= */
 
 fetchMarket(true);
 
 
-/*
- * Free Twelve Data:
- * 800 request/hari.
- *
- * 120 detik = sekitar
- * 720 request/hari.
- */
+/* =========================================================
+   MARKET POLLING
+       
+   120 DETIK
+       
+   Free Twelve Data:
+   ±720 request/hari untuk 1 symbol
+   ========================================================= */
 
 state.timer =
     setInterval(
         () => {
+
             fetchMarket(false);
+
         },
         120000
     );

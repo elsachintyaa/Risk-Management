@@ -18,10 +18,11 @@ export default async function handler(req, res) {
         "N225": 20
     };
 
-    if (!spreads[symbol]) {
+    if (!Object.prototype.hasOwnProperty.call(spreads, symbol)) {
         return res.status(400).json({
             success: false,
-            message: "Symbol tidak valid"
+            message: "Symbol tidak valid",
+            symbol
         });
     }
 
@@ -33,22 +34,20 @@ export default async function handler(req, res) {
 
     try {
 
-        /* =========================================
+        /* =====================================================
            CURRENT PRICE
-           ========================================= */
+           ===================================================== */
 
         const priceURL =
             "https://api.twelvedata.com/price" +
             `?symbol=${encodeURIComponent(symbol)}` +
             `&apikey=${encodeURIComponent(apiKey)}`;
 
-        const priceResponse =
-            await fetch(priceURL, {
-                cache: "no-store"
-            });
+        const priceResponse = await fetch(priceURL, {
+            cache: "no-store"
+        });
 
-        const priceData =
-            await priceResponse.json();
+        const priceData = await priceResponse.json();
 
         if (
             !priceResponse.ok ||
@@ -59,27 +58,28 @@ export default async function handler(req, res) {
                 priceResponse.status || 502
             ).json({
                 success: false,
-                message:
-                    "Twelve Data menolak request harga",
+                message: "Twelve Data menolak request harga",
                 response: priceData
             });
         }
 
-        const price =
-            Number(priceData.price);
+        const price = Number(priceData.price);
 
         if (!Number.isFinite(price)) {
             return res.status(502).json({
                 success: false,
-                message:
-                    "Harga market tidak ditemukan"
+                message: "Harga market tidak ditemukan",
+                response: priceData
             });
         }
 
 
-        /* =========================================
+        /* =====================================================
            HISTORICAL CANDLES
-           ========================================= */
+           
+           5 MENIT
+           48 CANDLE
+           ===================================================== */
 
         let candles = [];
 
@@ -88,15 +88,14 @@ export default async function handler(req, res) {
             const historyURL =
                 "https://api.twelvedata.com/time_series" +
                 `?symbol=${encodeURIComponent(symbol)}` +
-                "&interval=1min" +
-                "&outputsize=42" +
+                "&interval=5min" +
+                "&outputsize=48" +
                 "&order=asc" +
                 `&apikey=${encodeURIComponent(apiKey)}`;
 
-            const historyResponse =
-                await fetch(historyURL, {
-                    cache: "no-store"
-                });
+            const historyResponse = await fetch(historyURL, {
+                cache: "no-store"
+            });
 
             const historyData =
                 await historyResponse.json();
@@ -111,9 +110,13 @@ export default async function handler(req, res) {
                     historyData.values
                         .map(item => ({
                             time: item.datetime,
+
                             open: Number(item.open),
+
                             high: Number(item.high),
+
                             low: Number(item.low),
+
                             close: Number(item.close)
                         }))
                         .filter(item =>
@@ -121,14 +124,15 @@ export default async function handler(req, res) {
                             Number.isFinite(item.high) &&
                             Number.isFinite(item.low) &&
                             Number.isFinite(item.close)
-                        );
+                        )
+                        .slice(-48);
             }
         }
 
 
-        /* =========================================
+        /* =====================================================
            RESPONSE
-           ========================================= */
+           ===================================================== */
 
         return res.status(200).json({
 
@@ -141,17 +145,14 @@ export default async function handler(req, res) {
             last_trade: price,
 
             sell:
-                price -
-                halfSpread,
+                price - halfSpread,
 
             buy:
-                price +
-                halfSpread,
+                price + halfSpread,
 
             spread,
 
-            half_spread:
-                halfSpread,
+            half_spread: halfSpread,
 
             candles,
 
@@ -159,20 +160,13 @@ export default async function handler(req, res) {
                 new Date().toISOString()
         });
 
-    }
+    } catch (error) {
 
-    catch (error) {
+        console.error("Market API Error:", error);
 
         return res.status(500).json({
-
             success: false,
-
-            message:
-                "Gagal menghubungi Twelve Data",
-
-            error:
-                error?.message ||
-                "Unknown error"
+            message: "Gagal menghubungi Twelve Data"
         });
     }
 }
