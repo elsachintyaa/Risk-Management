@@ -33,10 +33,9 @@ export default async function handler(req, res) {
         String(req.query.history || "") === "1";
 
     try {
-
-        /* =====================================================
-           CURRENT PRICE
-           ===================================================== */
+        // =====================================================
+        // 1. AMBIL HARGA TERKINI
+        // =====================================================
 
         const priceURL =
             "https://api.twelvedata.com/price" +
@@ -73,25 +72,23 @@ export default async function handler(req, res) {
             });
         }
 
-
-        /* =====================================================
-           HISTORICAL CANDLES
-           
-           5 MENIT
-           48 CANDLE
-           ===================================================== */
+        // =====================================================
+        // 2. HISTORY CANDLE HANYA SAAT DIMINTA
+        //    Dipakai saat pertama kali buka / ganti produk
+        // =====================================================
 
         let candles = [];
 
         if (wantsHistory) {
-
             const historyURL =
                 "https://api.twelvedata.com/time_series" +
                 `?symbol=${encodeURIComponent(symbol)}` +
                 "&interval=5min" +
-                "&outputsize=48" +
+                "&outputsize=60" +
                 "&order=asc" +
-                `&apikey=${encodeURIComponent(apiKey)}`;
+                "&timezone=UTC" +
+                "&apikey=" +
+                encodeURIComponent(apiKey);
 
             const historyResponse = await fetch(historyURL, {
                 cache: "no-store"
@@ -105,18 +102,14 @@ export default async function handler(req, res) {
                 historyData.status !== "error" &&
                 Array.isArray(historyData.values)
             ) {
-
                 candles =
                     historyData.values
                         .map(item => ({
                             time: item.datetime,
 
                             open: Number(item.open),
-
                             high: Number(item.high),
-
                             low: Number(item.low),
-
                             close: Number(item.close)
                         }))
                         .filter(item =>
@@ -125,48 +118,40 @@ export default async function handler(req, res) {
                             Number.isFinite(item.low) &&
                             Number.isFinite(item.close)
                         )
-                        .slice(-48);
+                        .slice(-40);
             }
         }
 
-
-        /* =====================================================
-           RESPONSE
-           ===================================================== */
+        // =====================================================
+        // 3. RESPONSE
+        // =====================================================
 
         return res.status(200).json({
-
             success: true,
 
             symbol,
 
             price,
-
             last_trade: price,
 
-            sell:
-                price - halfSpread,
-
-            buy:
-                price + halfSpread,
+            sell: price - halfSpread,
+            buy: price + halfSpread,
 
             spread,
-
             half_spread: halfSpread,
 
             candles,
 
-            timestamp:
-                new Date().toISOString()
+            timestamp: new Date().toISOString()
         });
 
     } catch (error) {
-
         console.error("Market API Error:", error);
 
         return res.status(500).json({
             success: false,
-            message: "Gagal menghubungi Twelve Data"
+            message: "Gagal menghubungi Twelve Data",
+            error: error.message
         });
     }
 }
