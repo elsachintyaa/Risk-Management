@@ -1,157 +1,89 @@
-export default async function handler(req, res) {
-    const apiKey = process.env.TWELVEDATA_API_KEY;
+// api/market.js  (Vercel Serverless Function)
+// Env yang dibutuhkan di Vercel: TWELVE_DATA_API_KEY
 
-    if (!apiKey) {
-        return res.status(500).json({
-            success: false,
-            message: "Twelve Data API key belum diatur di Vercel"
-        });
-    }
+const ALLOWED_SYMBOLS = ["XAU/USD", "HSI", "N225"];
 
-    const symbol = String(
-        req.query.symbol || "XAU/USD"
-    ).trim();
-
-    const spreads = {
-        "XAU/USD": 0.80,
-        "HSI": 16,
-        "N225": 20
-    };
-
-    if (!Object.prototype.hasOwnProperty.call(spreads, symbol)) {
-        return res.status(400).json({
-            success: false,
-            message: "Symbol tidak valid",
-            symbol
-        });
-    }
-
-    const spread = spreads[symbol];
-    const halfSpread = spread / 2;
-
-    const wantsHistory =
-        String(req.query.history || "") === "1";
+module.exports = async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
 
     try {
-        // =====================================================
-        // 1. AMBIL HARGA TERKINI
-        // =====================================================
+        const apiKey = process.env.TWELVE_DATA_API_KEY;
 
-        const priceURL =
-            "https://api.twelvedata.com/price" +
-            `?symbol=${encodeURIComponent(symbol)}` +
-            `&apikey=${encodeURIComponent(apiKey)}`;
-
-        const priceResponse = await fetch(priceURL, {
-            cache: "no-store"
-        });
-
-        const priceData = await priceResponse.json();
-
-        if (
-            !priceResponse.ok ||
-            priceData.status === "error" ||
-            priceData.code
-        ) {
-            return res.status(
-                priceResponse.status || 502
-            ).json({
+        if (!apiKey) {
+            return res.status(500).json({
                 success: false,
-                message: "Twelve Data menolak request harga",
-                response: priceData
+                message: "TWELVE_DATA_API_KEY belum diset di Vercel"
             });
         }
 
-        const price = Number(priceData.price);
+        const symbol = String(req.query.symbol || "XAU/USD");
 
-        if (!Number.isFinite(price)) {
+        if (!ALLOWED_SYMBOLS.includes(symbol)) {
+            return res.status(400).json({
+                success: false,
+                message: "Symbol tidak didukung"
+            });
+        }
+
+        // history=1 -> 40 candle (saat pilih produk)
+        // selain itu -> 3 candle terakhir (polling hemat, tetap 1 credit)
+        const outputsize = req.query.history === "1" ? 40 : 3;
+
+        const url =
+            "https://api.twelvedata.com/time_series" +
+            `?symbol=${encodeURIComponent(symbol)}` +
+            "&interval=5min" +
+            `&outputsize=${outputsize}` +
+            "&order=ASC" +        // urut lama -> baru
+            "&timezone=UTC" +     // waktu seragam, mudah di-parse
+            `&apikey=${apiKey}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === "error" || !Array.isArray(data.values)) {
             return res.status(502).json({
                 success: false,
-                message: "Harga market tidak ditemukan",
-                response: priceData
+                message: data.message || "Gagal mengambil data Twelve Data"
             });
         }
 
-        // =====================================================
-        // 2. HISTORY CANDLE HANYA SAAT DIMINTA
-        //    Dipakai saat pertama kali buka / ganti produk
-        // =====================================================
+        const candles = data.values
+            .map(v => ({
+                time: Date.parse(String(v.datetime).replace(" ", "T") + "Z"),
+                open: Number(v.open),
+                high: Number(v.high),
+                low: Number(v.low),
+                close: Number(v.close)
+            }))
+            .filter(c =>
+                Number.isFinite(c.time) &&
+                Number.isFinite(c.open) &&
+                Number.isFinite(c.high) &&
+                Number.isFinite(c.low) &&
+                Number.isFinite(c.close)
+            );
 
-        let candles = [];
-
-        if (wantsHistory) {
-            const historyURL =
-                "https://api.twelvedata.com/time_series" +
-                `?symbol=${encodeURIComponent(symbol)}` +
-                "&interval=5min" +
-                "&outputsize=60" +
-                "&order=asc" +
-                "&timezone=UTC" +
-                "&apikey=" +
-                encodeURIComponent(apiKey);
-
-            const historyResponse = await fetch(historyURL, {
-                cache: "no-store"
+        if (!candles.length) {
+            return res.status(502).json({
+                success: false,
+                message: "Data candle kosong"
             });
-
-            const historyData =
-                await historyResponse.json();
-
-            if (
-                historyResponse.ok &&
-                historyData.status !== "error" &&
-                Array.isArray(historyData.values)
-            ) {
-                candles =
-                    historyData.values
-                        .map(item => ({
-                            time: item.datetime,
-
-                            open: Number(item.open),
-                            high: Number(item.high),
-                            low: Number(item.low),
-                            close: Number(item.close)
-                        }))
-                        .filter(item =>
-                            Number.isFinite(item.open) &&
-                            Number.isFinite(item.high) &&
-                            Number.isFinite(item.low) &&
-                            Number.isFinite(item.close)
-                        )
-                        .slice(-40);
-            }
         }
 
-        // =====================================================
-        // 3. RESPONSE
-        // =====================================================
+        const last = candles[candles.length - 1];
 
         return res.status(200).json({
             success: true,
-
             symbol,
-
-            price,
-            last_trade: price,
-
-            sell: price - halfSpread,
-            buy: price + halfSpread,
-
-            spread,
-            half_spread: halfSpread,
-
-            candles,
-
-            timestamp: new Date().toISOString()
+            price: last.close,
+            timestamp: new Date(last.time).toISOString(),
+            candles
         });
-
     } catch (error) {
-        console.error("Market API Error:", error);
-
         return res.status(500).json({
             success: false,
-            message: "Gagal menghubungi Twelve Data",
-            error: error.message
+            message: error.message || "Server error"
         });
     }
-}
+};
