@@ -45,6 +45,12 @@ const CHART = {
     background: "#080d13"
 };
 
+const MANUAL_EXAMPLES = {
+    gold: "Contoh: 4137.54",
+    hangseng: "Contoh: 25934.75",
+    nikkei: "Contoh: 60000"
+};
+
 /* =========================================================
    STATE
 ========================================================= */
@@ -57,7 +63,11 @@ const state = {
     // Twelve Data: 1 request = 1 credit. 120 detik = hemat.
     pollingMs: 120 * 1000,
     pollingTimer: null,
-    loading: false
+    loading: false,
+
+    // "live"  = harga dari API
+    // "manual" = harga diinput sendiri
+    mode: "live"
 };
 
 /* =========================================================
@@ -76,6 +86,58 @@ function setText(id, text) {
 function toNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+}
+
+/*
+ * Baca angka dari input teks, tahan terhadap format:
+ *   10000   10.000   10,000   10.000,50   10,000.50   4137.54   4137,54
+ *
+ * Aturan:
+ * - Kalau ada titik DAN koma, yang paling kanan = desimal.
+ * - Kalau hanya satu jenis pemisah:
+ *     - muncul lebih dari sekali, atau tepat 3 digit di belakangnya
+ *       dengan bagian depan 1-3 digit (mis. 10.000 / 60,000) = ribuan.
+ *     - selain itu = desimal.
+ */
+function parseInput(value) {
+    let text = String(value ?? "").replace(/[^\d.,]/g, "");
+
+    if (!text) return 0;
+
+    const hasDot = text.includes(".");
+    const hasComma = text.includes(",");
+
+    if (hasDot && hasComma) {
+        const decimalSep =
+            text.lastIndexOf(".") > text.lastIndexOf(",") ? "." : ",";
+        const thousandSep = decimalSep === "." ? "," : ".";
+
+        text = text
+            .split(thousandSep).join("")
+            .replace(decimalSep, ".");
+    } else if (hasDot || hasComma) {
+        const sep = hasDot ? "." : ",";
+        const parts = text.split(sep);
+        const last = parts[parts.length - 1];
+        const first = parts[0];
+
+        const isThousands =
+            parts.length > 2 ||
+            (
+                last.length === 3 &&
+                first.length >= 1 &&
+                first.length <= 3 &&
+                !first.startsWith("0")
+            );
+
+        text = isThousands
+            ? parts.join("")
+            : `${first}.${last}`;
+    }
+
+    const number = Number(text);
+
+    return Number.isFinite(number) ? number : 0;
 }
 
 function formatNumber(value, decimals = 2) {
@@ -114,6 +176,13 @@ function setProduct(productKey) {
     setText("instrument-name", product.name);
     setText("chart-symbol", product.symbol);
 
+    // Mode manual: tidak ada API / polling. Harga diisi sendiri.
+    if (state.mode === "manual") {
+        resetManualInput();
+        calculateRisk();
+        return;
+    }
+
     resetMarketDisplay();
     fetchMarket(true);
 
@@ -151,6 +220,114 @@ function resetMarketDisplay() {
 }
 
 /* =========================================================
+   MODE: LIVE / MANUAL
+========================================================= */
+
+function applyModeUI() {
+    const isManual = state.mode === "manual";
+
+    const live = $("live-section");
+    const manual = $("manual-section");
+
+    if (live) live.classList.toggle("hidden", isManual);
+    if (manual) manual.classList.toggle("hidden", !isManual);
+
+    const activeClasses = ["bg-amber-400", "text-slate-950"];
+    const inactiveClasses = ["text-slate-400"];
+
+    [
+        ["mode-live", !isManual],
+        ["mode-manual", isManual]
+    ].forEach(([id, active]) => {
+        const button = $(id);
+        if (!button) return;
+
+        activeClasses.forEach(c => button.classList.toggle(c, active));
+        inactiveClasses.forEach(c => button.classList.toggle(c, !active));
+        button.setAttribute("aria-pressed", String(active));
+    });
+
+    setText(
+        "footer-note",
+        isManual
+            ? "Client Risk Monitor • Mode manual, harga diinput sendiri"
+            : "Client Risk Monitor • Market data berjalan otomatis"
+    );
+
+    try {
+        history.replaceState(
+            null,
+            "",
+            isManual
+                ? "#manual"
+                : location.pathname + location.search
+        );
+    } catch (error) {
+        /* abaikan */
+    }
+}
+
+function setMode(mode) {
+    if (mode !== "live" && mode !== "manual") return;
+
+    state.mode = mode;
+
+    applyModeUI();
+
+    // setProduct otomatis: live -> ambil API, manual -> kosongkan input
+    setProduct(state.product.key);
+}
+
+function resetManualInput() {
+    const input = $("manual-price");
+
+    if (input) {
+        input.value = "";
+        input.placeholder = MANUAL_EXAMPLES[state.product.key] || "";
+    }
+
+    state.price = 0;
+    state.previousPrice = null;
+
+    setText(
+        "manual-product",
+        `${state.product.name} · ${state.product.symbol}`
+    );
+
+    const spread = state.product.spread;
+
+    setText(
+        "manual-spread",
+        `Spread ${formatNumber(spread, 2)}: ` +
+        `Buy = harga + ${formatNumber(spread / 2, 2)}, ` +
+        `Sell = harga - ${formatNumber(spread / 2, 2)}`
+    );
+
+    setText("manual-price-preview", "");
+}
+
+function handleManualPriceInput() {
+    const input = $("manual-price");
+    if (!input) return;
+
+    // Hanya angka, titik, koma
+    const cleaned = input.value.replace(/[^\d.,]/g, "");
+    if (cleaned !== input.value) input.value = cleaned;
+
+    const price = parseInput(input.value);
+
+    state.previousPrice = null;
+    state.price = price > 0 ? price : 0;
+
+    setText(
+        "manual-price-preview",
+        price > 0 ? `Harga dibaca: ${formatPrice(price)}` : ""
+    );
+
+    calculateRisk();
+}
+
+/* =========================================================
    DATA TIDAK TERSEDIA
 ========================================================= */
 
@@ -171,9 +348,19 @@ function showUnavailable(reason) {
             'justify-content:center;padding:16px;text-align:center;' +
             'font-size:12px;line-height:1.6;color:rgba(255,255,255,0.55);' +
             'background:#080d13;">' +
+            "<div>" +
             `Data harga ${state.product.name} belum tersedia.<br>` +
-            "Kalkulator risiko tetap bisa dipakai untuk produk GOLD." +
-            "</div>";
+            "Gunakan mode manual untuk memasukkan harga sendiri.<br>" +
+            '<button id="go-manual" type="button" ' +
+            'style="margin-top:10px;padding:8px 14px;border-radius:999px;' +
+            'background:#fbbf24;color:#020617;font-weight:700;font-size:11px;">' +
+            "HITUNG MANUAL</button>" +
+            "</div></div>";
+
+        const goManual = $("go-manual");
+        if (goManual) {
+            goManual.addEventListener("click", () => setMode("manual"));
+        }
     }
 
     console.warn("DATA TIDAK TERSEDIA:", reason);
@@ -184,6 +371,7 @@ function showUnavailable(reason) {
 ========================================================= */
 
 async function fetchMarket(loadHistory = false) {
+    if (state.mode !== "live") return;
     if (state.loading) return;
     state.loading = true;
 
@@ -201,7 +389,12 @@ async function fetchMarket(loadHistory = false) {
         }
 
         // Abaikan response kalau user sudah pindah produk
-        if (productAtRequest !== state.product.key) return;
+        if (
+            productAtRequest !== state.product.key ||
+            state.mode !== "live"
+        ) {
+            return;
+        }
 
         if (Array.isArray(data.candles)) {
             mergeCandles(data.candles.map(normalizeCandle).filter(Boolean));
@@ -209,6 +402,8 @@ async function fetchMarket(loadHistory = false) {
 
         updateMarket(toNumber(data.price));
     } catch (error) {
+        if (state.mode !== "live") return;
+
         console.error("FETCH MARKET ERROR:", error);
 
         // Produk selain emas yang belum pernah berhasil dimuat:
@@ -399,7 +594,7 @@ function priceToY(price, lowest, range, top, chartHeight) {
 
 function drawCandles() {
     const container = $("market-chart");
-    if (!container) return;
+    if (!container || state.mode !== "live") return;
 
     let canvas = container.querySelector("canvas");
 
@@ -619,10 +814,10 @@ function calculateRisk() {
         return;
     }
 
-    const equity = toNumber(equityInput.value);
+    const equity = parseInput(equityInput.value);
     const lot = Math.max(0, Math.floor(toNumber(lotInput.value)));
-    const marginRequired = toNumber(marginInput.value);
-    const openPrice = toNumber(openPriceInput.value);
+    const marginRequired = parseInput(marginInput.value);
+    const openPrice = parseInput(openPriceInput.value);
     const currentPrice = state.price;
 
     if (
@@ -658,6 +853,7 @@ function calculateRisk() {
     const effectiveMargin = marginRequired;
     const equityRatio = (runningEquity / effectiveMargin) * 100;
 
+    setFloatingPL(pnl);
     setText("running-equity", `$${formatNumber(runningEquity, 2)}`);
     setText("effective-margin", `$${formatNumber(effectiveMargin, 2)}`);
     setText("equity-ratio", `${formatNumber(equityRatio, 2)}%`);
@@ -711,6 +907,19 @@ function calculateRisk() {
     updateRiskStatus(equityRatio);
 }
 
+function setFloatingPL(pnl) {
+    const el = $("floating-pl");
+    if (!el) return;
+
+    const sign = pnl > 0 ? "+" : pnl < 0 ? "-" : "";
+
+    el.textContent = `${sign}$${formatNumber(Math.abs(pnl), 2)}`;
+
+    el.classList.remove("text-emerald-400", "text-red-400");
+    if (pnl > 0) el.classList.add("text-emerald-400");
+    if (pnl < 0) el.classList.add("text-red-400");
+}
+
 function updateRiskStatus(ratio) {
     const riskStatus = $("risk-status");
     const riskIcon = $("risk-icon");
@@ -743,6 +952,13 @@ function resetRiskDisplay() {
         "additional-fund"
     ].forEach(id => setText(id, "0.00"));
 
+    setText("floating-pl", "0.00");
+
+    const floating = $("floating-pl");
+    if (floating) {
+        floating.classList.remove("text-emerald-400", "text-red-400");
+    }
+
     setText("call-status", "-");
     setText("liquidation-status", "-");
     setText("risk-status", "-");
@@ -752,6 +968,23 @@ function resetRiskDisplay() {
 /* =========================================================
    POSITION BUTTON
 ========================================================= */
+
+const POSITION_STYLE = {
+    buyActive: ["border-emerald-400", "bg-emerald-500/20", "text-emerald-400"],
+    sellActive: ["border-red-400", "bg-red-500/20", "text-red-400"],
+    inactive: ["border-white/10", "bg-slate-800", "text-slate-400"]
+};
+
+function stylePositionButton(button, classes) {
+    const all = [
+        ...POSITION_STYLE.buyActive,
+        ...POSITION_STYLE.sellActive,
+        ...POSITION_STYLE.inactive
+    ];
+
+    button.classList.remove(...all);
+    button.classList.add(...classes);
+}
 
 function setPosition(type) {
     const buyButton = $("buy-button");
@@ -764,8 +997,15 @@ function setPosition(type) {
     buyButton.dataset.active = String(isBuy);
     sellButton.dataset.active = String(!isBuy);
 
-    buyButton.classList.toggle("active", isBuy);
-    sellButton.classList.toggle("active", !isBuy);
+    stylePositionButton(
+        buyButton,
+        isBuy ? POSITION_STYLE.buyActive : POSITION_STYLE.inactive
+    );
+
+    stylePositionButton(
+        sellButton,
+        isBuy ? POSITION_STYLE.inactive : POSITION_STYLE.sellActive
+    );
 
     calculateRisk();
 }
@@ -779,6 +1019,12 @@ function setupInputs() {
         const el = $(id);
         if (el) el.addEventListener("input", calculateRisk);
     });
+
+    const manualPrice = $("manual-price");
+
+    if (manualPrice) {
+        manualPrice.addEventListener("input", handleManualPriceInput);
+    }
 
     const lot = $("lot");
 
@@ -814,6 +1060,14 @@ function setupProductButtons() {
     });
 }
 
+function setupModeButtons() {
+    const live = $("mode-live");
+    const manual = $("mode-manual");
+
+    if (live) live.addEventListener("click", () => setMode("live"));
+    if (manual) manual.addEventListener("click", () => setMode("manual"));
+}
+
 function setupPositionButtons() {
     const buyButton = $("buy-button");
     const sellButton = $("sell-button");
@@ -837,7 +1091,15 @@ document.addEventListener("DOMContentLoaded", () => {
     setupInputs();
     setupProductButtons();
     setupPositionButtons();
+    setupModeButtons();
     updateProductButtons();
+
+    // Buka langsung mode manual lewat alamat: ...#manual
+    if (location.hash === "#manual") {
+        state.mode = "manual";
+    }
+
+    applyModeUI();
 
     // Redraw otomatis kalau ukuran container chart berubah
     const chart = $("market-chart");

@@ -37,13 +37,32 @@
             </h1>
         </div>
 
-        <div class="mt-1 flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-2">
+        <div
+            class="mt-1 flex shrink-0 rounded-full border border-white/10 bg-slate-900 p-1"
+            role="group"
+            aria-label="Mode harga">
 
-            <span class="h-2 w-2 animate-pulse rounded-full bg-emerald-400"></span>
+            <button
+                id="mode-live"
+                type="button"
+                aria-pressed="true"
+                class="flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-2 text-[11px] font-bold text-slate-950 transition">
 
-            <span class="text-xs font-bold text-emerald-400">
+                <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+
                 LIVE
-            </span>
+
+            </button>
+
+            <button
+                id="mode-manual"
+                type="button"
+                aria-pressed="false"
+                class="rounded-full px-3 py-2 text-[11px] font-bold text-slate-400 transition">
+
+                HITUNG MANUAL
+
+            </button>
 
         </div>
 
@@ -54,7 +73,7 @@
          MARKET PRICE
     ====================================================== -->
 
-    <section class="mb-4 rounded-3xl border border-white/10 bg-slate-900 p-5 shadow-xl shadow-black/10">
+    <section id="live-section" class="mb-4 rounded-3xl border border-white/10 bg-slate-900 p-5 shadow-xl shadow-black/10">
 
         <div class="flex items-start justify-between">
 
@@ -184,6 +203,75 @@
             </div>
 
         </div>
+
+    </section>
+
+
+    <!-- =====================================================
+         HARGA MANUAL
+    ====================================================== -->
+
+    <section
+        id="manual-section"
+        class="mb-4 hidden rounded-3xl border border-amber-400/20 bg-slate-900 p-5 shadow-xl shadow-black/10">
+
+        <div class="flex items-start justify-between">
+
+            <div>
+
+                <p class="text-xs font-medium tracking-widest text-slate-500">
+                    HARGA BERJALAN • MANUAL
+                </p>
+
+                <h2 class="mt-1 text-lg font-bold">
+                    Input Harga
+                </h2>
+
+            </div>
+
+
+            <div class="rounded-2xl bg-slate-800 px-4 py-3 text-right">
+
+                <p class="text-[9px] font-medium tracking-widest text-slate-500">
+                    INSTRUMENT
+                </p>
+
+                <p
+                    id="manual-product"
+                    class="mt-1 text-sm font-bold text-amber-400">
+                    GOLD · XAU/USD
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <label
+            for="manual-price"
+            class="mb-2 mt-5 block text-sm font-medium text-slate-300">
+
+            Harga Berjalan (Last Trade)
+
+        </label>
+
+        <input
+            id="manual-price"
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            placeholder="Contoh: 4137.54"
+            class="no-spinner w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-4 text-white outline-none transition focus:border-amber-400">
+
+        <p
+            id="manual-price-preview"
+            class="mt-2 min-h-[1rem] text-xs text-amber-400">
+        </p>
+
+        <p
+            id="manual-spread"
+            class="mt-1 text-xs text-slate-500">
+        </p>
 
     </section>
 
@@ -751,7 +839,7 @@
 
     <footer class="pb-4 text-center text-[10px] text-slate-600">
 
-        Client Risk Monitor • Market data berjalan otomatis
+        <span id="footer-note">Client Risk Monitor • Market data berjalan otomatis</span>
 
     </footer>
 
