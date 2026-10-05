@@ -7,7 +7,7 @@ module.exports = async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
 
     try {
-        const apiKey = process.env.TWELVE_DATA_API_KEY;
+        const apiKey = process.env.TWELVEDATA_API_KEY;
 
         if (!apiKey) {
             return res.status(500).json({
