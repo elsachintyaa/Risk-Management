@@ -181,7 +181,10 @@ async function fetchMarket(loadHistory = false) {
         updateMarket(toNumber(data.price));
     } catch (error) {
         console.error("FETCH MARKET ERROR:", error);
-        setText("market-update", "Gagal mengambil data market");
+        setText(
+            "market-update",
+            `Gagal mengambil data market: ${error.message}`
+        );
     } finally {
         state.loading = false;
     }
@@ -191,14 +194,43 @@ async function fetchMarket(loadHistory = false) {
    CANDLE DATA
 ========================================================= */
 
+/*
+ * Waktu dari API berupa string UTC tanpa zona,
+ * contoh "2026-10-05 02:00:00". Harus dibaca sebagai UTC,
+ * kalau tidak akan bergeser sesuai zona waktu browser.
+ */
+function parseCandleTime(value) {
+    if (typeof value === "number") return value;
+
+    const text = String(value || "").trim();
+    if (!text) return NaN;
+
+    const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(text);
+
+    return Date.parse(hasZone ? text : text.replace(" ", "T") + "Z");
+}
+
+/*
+ * Masukkan harga berjalan ke candle terakhir
+ * selama masih dalam periode 5 menit yang sama.
+ */
+function applyLivePrice(price) {
+    const last = state.candles[state.candles.length - 1];
+    if (!last) return;
+
+    const now = Date.now();
+
+    if (now >= last.time && now < last.time + CHART.candleIntervalMs) {
+        last.close = price;
+        last.high = Math.max(last.high, price);
+        last.low = Math.min(last.low, price);
+    }
+}
+
 function normalizeCandle(candle) {
     if (!candle) return null;
 
-    // time bisa berupa angka (ms) atau string tanggal
-    const time =
-        typeof candle.time === "number"
-            ? candle.time
-            : Date.parse(candle.time);
+    const time = parseCandleTime(candle.time);
 
     const open = Number(candle.open);
     const high = Number(candle.high);
@@ -242,6 +274,7 @@ function updateMarket(price) {
     state.previousPrice = state.price > 0 ? state.price : null;
     state.price = price;
 
+    applyLivePrice(price);
     updatePriceDisplay();
     drawCandles();
     calculateRisk();
