@@ -151,6 +151,35 @@ function resetMarketDisplay() {
 }
 
 /* =========================================================
+   DATA TIDAK TERSEDIA
+========================================================= */
+
+function showUnavailable(reason) {
+    // Hentikan polling supaya credit API tidak terbuang
+    clearInterval(state.pollingTimer);
+
+    setText(
+        "market-update",
+        `Data ${state.product.name} belum tersedia`
+    );
+
+    const chart = $("market-chart");
+
+    if (chart) {
+        chart.innerHTML =
+            '<div style="display:flex;height:100%;align-items:center;' +
+            'justify-content:center;padding:16px;text-align:center;' +
+            'font-size:12px;line-height:1.6;color:rgba(255,255,255,0.55);' +
+            'background:#080d13;">' +
+            `Data harga ${state.product.name} belum tersedia.<br>` +
+            "Kalkulator risiko tetap bisa dipakai untuk produk GOLD." +
+            "</div>";
+    }
+
+    console.warn("DATA TIDAK TERSEDIA:", reason);
+}
+
+/* =========================================================
    MARKET API
 ========================================================= */
 
@@ -181,10 +210,17 @@ async function fetchMarket(loadHistory = false) {
         updateMarket(toNumber(data.price));
     } catch (error) {
         console.error("FETCH MARKET ERROR:", error);
-        setText(
-            "market-update",
-            `Gagal mengambil data market: ${error.message}`
-        );
+
+        // Produk selain emas yang belum pernah berhasil dimuat:
+        // tampilkan pesan jelas, bukan error teknis.
+        if (state.product.key !== "gold" && !state.candles.length) {
+            showUnavailable(error.message);
+        } else {
+            setText(
+                "market-update",
+                `Gagal mengambil data market: ${error.message}`
+            );
+        }
     } finally {
         state.loading = false;
     }
